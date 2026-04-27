@@ -1,5 +1,6 @@
 import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS } from "@/lib/constants";
 import { getDashboardStats, searchStudents } from "@/lib/data";
+import { ChatAssistant } from "@/components/chat-assistant";
 import { CalendarDays, Download, Search, User } from "lucide-react";
 
 type PageProps = {
@@ -177,6 +178,7 @@ export default async function Home({ searchParams }: PageProps) {
             </aside>
           </section>
         </div>
+        <ChatAssistant />
       </main>
     </div>
   );

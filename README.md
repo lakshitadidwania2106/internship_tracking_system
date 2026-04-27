@@ -79,4 +79,21 @@ A placeholder service boundary for future LLM features is available in:
 
 - `src/lib/ai/internship-ai.ts`
 
-Current mode is database-only (local/offline ready).
+Current mode supports direct database answers and optional local Ollama fallback.
+
+## Teacher Chatbot (Ollama + DB)
+
+- Floating chatbot button appears on the dashboard.
+- It answers direct internship questions using database records first.
+- If needed, it falls back to local Ollama (`http://127.0.0.1:11434`) for concise summaries.
+
+Examples:
+- `What internship company did 1DS21AI001 do?`
+- `What is the stipend of Amit A?`
+- `Show mapping for 1DS20AI024`
+
+Optional environment variable:
+
+```bash
+OLLAMA_MODEL=llama3.2
+```
