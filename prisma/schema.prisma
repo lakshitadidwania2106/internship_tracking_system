@@ -1,0 +1,108 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Batch {
+  id        Int              @id @default(autoincrement())
+  year      Int              @unique
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  semesters SemesterRecord[]
+  students  Student[]
+}
+
+model SemesterRecord {
+  id         Int       @id @default(autoincrement())
+  semester   Int
+  courseCode String
+  courseName String
+  credits    Int
+  batchId    Int
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  batch      Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  students   Student[]
+
+  @@unique([batchId, semester])
+}
+
+model Student {
+  id               Int              @id @default(autoincrement())
+  usn              String           @unique
+  fullName         String
+  batchId          Int
+  semesterRecordId Int
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  batch            Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  semesterRecord   SemesterRecord   @relation(fields: [semesterRecordId], references: [id], onDelete: Cascade)
+  internship       Internship?
+  mapping          OutcomeMapping?
+  documents        StudentDocument[]
+}
+
+model Internship {
+  id               Int       @id @default(autoincrement())
+  studentId        Int       @unique
+  companyName      String
+  roleTitle        String
+  stipend          String?
+  startDateRaw     String?
+  endDateRaw       String?
+  durationText     String?
+  grade            String?
+  status           String?
+  sourceRowRawJson String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  student          Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model OutcomeMapping {
+  id               Int      @id @default(autoincrement())
+  studentId        Int      @unique
+  relevantPOs      String?
+  relevantPSOs     String?
+  coMappingSummary String?
+  justification    String?
+  sourceRowRawJson String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  student          Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model StudentDocument {
+  id            Int      @id @default(autoincrement())
+  studentId     Int
+  documentType  String
+  fileLabel     String
+  storagePath   String
+  originalName  String?
+  uploadedAtRaw String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model ImportJob {
+  id             Int      @id @default(autoincrement())
+  sourceFileName String
+  batchYear      Int
+  semester       Int
+  status         String
+  rowsRead       Int      @default(0)
+  rowsImported   Int      @default(0)
+  errorSummary   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
