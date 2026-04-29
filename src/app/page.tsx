@@ -1,60 +1,85 @@
 import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS } from "@/lib/constants";
-import { getDashboardStats, searchStudents } from "@/lib/data";
+import { CO_JUSTIFICATIONS, CO_PO_PSO_COLUMNS, CO_PO_PSO_MATRIX, INTERNSHIP_COS } from "@/lib/co-po-pso";
+import { getDashboardStats, getRecentImportJobs, getStudentsForBatchSemester, searchStudents } from "@/lib/data";
 import { ChatAssistant } from "@/components/chat-assistant";
-import { CalendarDays, Download, Search, User } from "lucide-react";
+import { BookOpenCheck, CalendarDays, Download, GraduationCap, Search, User } from "lucide-react";
+import Image from "next/image";
 
 type PageProps = {
   searchParams: Promise<{
     batch?: string;
     semester?: string;
     usn?: string;
+    tab?: string;
   }>;
 };
 
 export default async function Home({ searchParams }: PageProps) {
   const filters = await searchParams;
+  const activeTab = (filters.tab ?? "overview").toLowerCase();
   const selectedBatch = Number(filters.batch) || 2020;
   const availableSemesters = BATCH_SEMESTER_MAP[selectedBatch] ?? [];
   const selectedSemester =
     Number(filters.semester) || (availableSemesters.length > 0 ? availableSemesters[0] : 8);
   const usnQuery = filters.usn?.trim() ?? "";
 
-  const [students, stats] = await Promise.all([
+  const [students, allStudents, stats, importJobs] = await Promise.all([
     searchStudents({
       batchYear: selectedBatch,
       semester: selectedSemester,
       usn: usnQuery || undefined,
     }),
+    getStudentsForBatchSemester(selectedBatch, selectedSemester),
     getDashboardStats(selectedBatch, selectedSemester),
+    getRecentImportJobs(),
   ]);
 
   const selectedStudent =
     students.find((student) => student.usn.toUpperCase() === usnQuery.toUpperCase()) ?? students[0];
+  const evaluation = getEvaluationSnapshot(selectedStudent?.internship?.sourceRowRawJson);
+  const averageMarks = getAverageMarks(allStudents);
+  const topCompanies = getTopCompanies(allStudents);
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      <aside className="hidden w-64 flex-col border-r border-border bg-white px-5 py-6 lg:flex">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary">DSCE AIML</p>
-          <h1 className="mt-2 text-lg font-semibold">Internship Portal</h1>
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="border-b border-[#9ad9cf] bg-[#b8efe3]">
+        <div className="mx-auto flex w-full max-w-[1280px] items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <Image
+              src="/api/assets/dsce-logo"
+              alt="Dayananda Sagar College of Engineering Logo"
+              width={220}
+              height={64}
+              className="h-12 w-auto rounded bg-white p-1 sm:h-14"
+              unoptimized
+            />
+            <h1 className="text-base font-semibold text-[var(--dsce-navy)] sm:text-2xl">
+              DSCE | Department of AIML - Internship Portal
+            </h1>
+          </div>
+          <div className="flex items-center gap-6">
+            <nav className="hidden items-center gap-2 text-xs text-slate-700 md:flex">
+              {DASHBOARD_LINKS.map((item) => (
+                <a
+                  key={item}
+                  href={`/?tab=${item.toLowerCase()}&batch=${selectedBatch}&semester=${selectedSemester}&usn=${encodeURIComponent(usnQuery)}`}
+                  className={`rounded-full px-3 py-1 ${
+                    activeTab === item.toLowerCase() ? "bg-white font-semibold text-[var(--dsce-blue)]" : ""
+                  }`}
+                >
+                  {item}
+                </a>
+              ))}
+            </nav>
+          </div>
         </div>
-        <nav className="mt-8 space-y-1">
-          {DASHBOARD_LINKS.map((item, index) => (
-            <div
-              key={item}
-              className={`rounded-lg px-3 py-2 text-sm ${index === 0 ? "bg-blue-50 font-medium text-primary" : "text-slate-600"}`}
-            >
-              {item}
-            </div>
-          ))}
-        </nav>
-      </aside>
+      </header>
 
-      <main className="flex-1 p-4 sm:p-6 lg:p-8">
-        <div className="rounded-2xl border border-border bg-card p-4 sm:p-6">
+      <main className="mx-auto w-full max-w-[1280px] p-4 sm:p-6">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-6">
           <header className="mb-6 flex flex-col gap-4 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 className="text-2xl font-semibold">DSCE | Department of AIML - Internship Portal</h2>
+              <h2 className="text-2xl font-semibold">Internship Dashboard</h2>
               <p className="text-sm text-muted">
                 Select a batch and semester, then search by USN to view student internship details.
               </p>
@@ -91,7 +116,8 @@ export default async function Home({ searchParams }: PageProps) {
             </button>
           </form>
 
-          <section className="grid gap-4 lg:grid-cols-3">
+          {activeTab === "overview" ? (
+            <section className="grid gap-4 lg:grid-cols-3">
             <article className="rounded-xl border border-border bg-white p-4 lg:col-span-2">
               {!selectedStudent ? (
                 <p className="text-sm text-muted">No students found for this filter.</p>
@@ -110,6 +136,7 @@ export default async function Home({ searchParams }: PageProps) {
                     <InfoItem label="Batch" value={String(selectedStudent.batch.year)} />
                     <InfoItem label="Semester" value={String(selectedStudent.semesterRecord.semester)} />
                     <InfoItem label="Course Code" value={selectedStudent.semesterRecord.courseCode} />
+                    <InfoItem label="Course Name" value={selectedStudent.semesterRecord.courseName} />
                     <InfoItem label="Credits" value={String(selectedStudent.semesterRecord.credits)} />
                     <InfoItem
                       label="Company"
@@ -132,27 +159,35 @@ export default async function Home({ searchParams }: PageProps) {
 
             <aside className="space-y-4">
               <div className="rounded-xl border border-border bg-white p-4">
-                <h4 className="mb-3 font-semibold">CO-PO-PSO Mapping</h4>
+                <h4 className="mb-3 font-semibold">Student CO-PO-PSO Snapshot</h4>
                 <MappingRow label="Relevant POs" value={selectedStudent?.mapping?.relevantPOs} />
                 <MappingRow label="Relevant PSOs" value={selectedStudent?.mapping?.relevantPSOs} />
                 <MappingRow
                   label="Summary"
-                  value={selectedStudent?.mapping?.coMappingSummary ?? "Will be populated from uploaded data."}
+                  value={selectedStudent?.mapping?.coMappingSummary ?? "Use InternBot for CO-wise justification details."}
                 />
               </div>
               <div className="rounded-xl border border-border bg-white p-4">
                 <h4 className="mb-3 font-semibold">Internship Report</h4>
-                {selectedStudent?.documents[0] ? (
+                {selectedStudent ? (
                   <a
-                    href={`/api/documents/${selectedStudent.documents[0].id}`}
+                    href={`/api/documents/by-usn/${selectedStudent.usn}`}
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white"
                   >
                     <Download className="h-4 w-4" />
                     Download Soft Copy
                   </a>
-                ) : (
-                  <p className="text-sm text-muted">No document linked yet.</p>
-                )}
+                ) : <p className="text-sm text-muted">No student selected.</p>}
+                <p className="mt-2 text-xs text-muted">Report filename should include the student USN.</p>
+              </div>
+              <div className="rounded-xl border border-border bg-white p-4">
+                <h4 className="mb-3 font-semibold">Internship Evaluation</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <MiniInfo label="Total Marks" value={evaluation.totalMarks ?? "-"} />
+                  <MiniInfo label="Evaluator" value={evaluation.evaluatorName ?? "-"} />
+                  <MiniInfo label="Report (10)" value={evaluation.reportMarks ?? "-"} />
+                  <MiniInfo label="Presentation (10)" value={evaluation.presentationMarks ?? "-"} />
+                </div>
               </div>
               <div className="rounded-xl border border-border bg-white p-4">
                 <h4 className="mb-3 font-semibold">Students In Selection</h4>
@@ -176,12 +211,288 @@ export default async function Home({ searchParams }: PageProps) {
                 <p>Excel import folders are ready at data/imports/excel and data/imports/reports.</p>
               </div>
             </aside>
+            </section>
+          ) : null}
+
+          {activeTab === "students" ? (
+            <section className="rounded-xl border border-border bg-white p-4">
+              <h3 className="mb-3 text-lg font-semibold">Students ({allStudents.length})</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className="px-3 py-2 text-left">USN</th>
+                      <th className="px-3 py-2 text-left">Name</th>
+                      <th className="px-3 py-2 text-left">Company</th>
+                      <th className="px-3 py-2 text-left">Role</th>
+                      <th className="px-3 py-2 text-left">Marks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allStudents.map((student) => {
+                      const evalRow = getEvaluationSnapshot(student.internship?.sourceRowRawJson);
+                      return (
+                        <tr key={student.id} className="border-b border-border">
+                          <td className="px-3 py-2">{student.usn}</td>
+                          <td className="px-3 py-2">{student.fullName}</td>
+                          <td className="px-3 py-2">{student.internship?.companyName ?? "-"}</td>
+                          <td className="px-3 py-2">{student.internship?.roleTitle ?? "-"}</td>
+                          <td className="px-3 py-2">{evalRow.totalMarks ?? "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === "internships" ? (
+            <section className="space-y-4">
+              <div className="rounded-xl border border-border bg-white p-4">
+                <h3 className="mb-3 text-lg font-semibold">Top Internship Companies</h3>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {topCompanies.map((item) => (
+                    <MetricCard key={item.name} label={item.name} value={`${item.count} students`} />
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border bg-white p-4">
+                <h4 className="mb-3 font-semibold">Internship Records</h4>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left">USN</th>
+                        <th className="px-3 py-2 text-left">Student</th>
+                        <th className="px-3 py-2 text-left">Company</th>
+                        <th className="px-3 py-2 text-left">Duration</th>
+                        <th className="px-3 py-2 text-left">Stipend</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allStudents.map((student) => (
+                        <tr key={student.id} className="border-b border-border">
+                          <td className="px-3 py-2">{student.usn}</td>
+                          <td className="px-3 py-2">{student.fullName}</td>
+                          <td className="px-3 py-2">{student.internship?.companyName ?? "-"}</td>
+                          <td className="px-3 py-2">
+                            {student.internship?.durationText ??
+                              `${student.internship?.startDateRaw ?? "-"} to ${student.internship?.endDateRaw ?? "-"}`}
+                          </td>
+                          <td className="px-3 py-2">{student.internship?.stipend ?? "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === "analytics" ? (
+            <section className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <MetricCard label="Avg Total Marks" value={averageMarks} />
+                <MetricCard label="Students with Stipend" value={String(allStudents.filter((s) => (s.internship?.stipend ?? "").trim() && s.internship?.stipend !== "-").length)} />
+                <MetricCard label="Unique Companies" value={String(new Set(allStudents.map((s) => s.internship?.companyName).filter(Boolean)).size)} />
+                <MetricCard label="Selected Batch/Sem" value={`${selectedBatch} / ${selectedSemester}`} />
+              </div>
+              <div className="rounded-xl border border-border bg-white p-4">
+                <h3 className="mb-3 text-lg font-semibold">CO-PO-PSO Mapping Matrix (1-3 Scale)</h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-xs sm:text-sm">
+                    <thead>
+                      <tr className="bg-slate-100">
+                        <th className="border border-border px-2 py-2 text-left font-semibold">CO / PO</th>
+                        {CO_PO_PSO_COLUMNS.map((column) => (
+                          <th key={column} className="border border-border px-2 py-2 font-semibold">{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(CO_PO_PSO_MATRIX).map(([co, values]) => (
+                        <tr key={co}>
+                          <td className="border border-border px-2 py-2 font-semibold text-primary">{co}</td>
+                          {values.map((value, index) => (
+                            <td
+                              key={`${co}-${CO_PO_PSO_COLUMNS[index]}`}
+                              className={`border border-border px-2 py-2 text-center ${
+                                value === "3"
+                                  ? "bg-emerald-100 font-semibold text-emerald-800"
+                                  : value === "2"
+                                    ? "bg-amber-50 text-amber-700"
+                                    : value === "1"
+                                      ? "bg-blue-50 text-blue-700"
+                                      : "text-slate-500"
+                              }`}
+                            >
+                              {value}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === "settings" ? (
+            <section className="space-y-4">
+              <div className="rounded-xl border border-border bg-white p-4">
+                <h3 className="mb-3 text-lg font-semibold">Portal Settings & Data Sources</h3>
+                <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+                  <li>Excel imports path: data/imports/excel</li>
+                  <li>Reports path: data/imports/reports</li>
+                  <li>Chat assistant mode: DB-first with Ollama fallback</li>
+                  <li>Current filter default: Batch {selectedBatch}, Semester {selectedSemester}</li>
+                </ul>
+              </div>
+              <div className="rounded-xl border border-border bg-white p-4">
+                <h4 className="mb-3 font-semibold">Recent Import Jobs</h4>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left">File</th>
+                        <th className="px-3 py-2 text-left">Batch/Sem</th>
+                        <th className="px-3 py-2 text-left">Rows</th>
+                        <th className="px-3 py-2 text-left">Imported</th>
+                        <th className="px-3 py-2 text-left">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importJobs.map((job) => (
+                        <tr key={job.id} className="border-b border-border">
+                          <td className="px-3 py-2">{job.sourceFileName}</td>
+                          <td className="px-3 py-2">{job.batchYear} / {job.semester}</td>
+                          <td className="px-3 py-2">{job.rowsRead}</td>
+                          <td className="px-3 py-2">{job.rowsImported}</td>
+                          <td className="px-3 py-2">{job.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          <section className="mt-6 space-y-4">
+            <div className="rounded-xl border border-border bg-white p-4">
+              <h3 className="mb-3 inline-flex items-center gap-2 text-lg font-semibold">
+                <GraduationCap className="h-5 w-5 text-primary" />
+                Course Outcomes (Internship)
+              </h3>
+              <div className="grid gap-3 md:grid-cols-2">
+                {INTERNSHIP_COS.map((co) => (
+                  <div key={co.id} className="rounded-lg border border-border bg-slate-50 p-3">
+                    <p className="text-sm font-semibold text-primary">{co.id}</p>
+                    <p className="text-sm text-slate-700">{co.title}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-white p-4">
+              <h3 className="mb-3 inline-flex items-center gap-2 text-lg font-semibold">
+                <BookOpenCheck className="h-5 w-5 text-primary" />
+                CO-PO-PSO Mapping Matrix (1-3 Scale)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse text-xs sm:text-sm">
+                  <thead>
+                    <tr className="bg-slate-100">
+                      <th className="border border-border px-2 py-2 text-left font-semibold">CO / PO</th>
+                      {CO_PO_PSO_COLUMNS.map((column) => (
+                        <th key={column} className="border border-border px-2 py-2 font-semibold">{column}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(CO_PO_PSO_MATRIX).map(([co, values]) => (
+                      <tr key={co}>
+                        <td className="border border-border px-2 py-2 font-semibold text-primary">{co}</td>
+                        {values.map((value, index) => (
+                          <td
+                            key={`${co}-${CO_PO_PSO_COLUMNS[index]}`}
+                            className={`border border-border px-2 py-2 text-center ${
+                              value === "3"
+                                ? "bg-emerald-100 font-semibold text-emerald-800"
+                                : value === "2"
+                                  ? "bg-amber-50 text-amber-700"
+                                  : value === "1"
+                                    ? "bg-blue-50 text-blue-700"
+                                    : "text-slate-500"
+                            }`}
+                          >
+                            {value}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-white p-4">
+              <h3 className="mb-3 text-lg font-semibold">Justification for CO-PO-PSO Mapping</h3>
+              <div className="space-y-3">
+                {CO_JUSTIFICATIONS.map((item) => (
+                  <details key={item.co} className="rounded-lg border border-border bg-slate-50 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+                      {item.co}: {item.heading}
+                    </summary>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                      {item.points.map((point) => (
+                        <li key={point}>{point}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </div>
+            </div>
           </section>
         </div>
         <ChatAssistant />
       </main>
     </div>
   );
+}
+
+function getEvaluationSnapshot(rawJson?: string | null) {
+  const fallback = {
+    totalMarks: undefined as string | undefined,
+    reportMarks: undefined as string | undefined,
+    presentationMarks: undefined as string | undefined,
+    evaluatorName: undefined as string | undefined,
+  };
+  if (!rawJson) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(rawJson) as {
+      evaluation?: {
+        totalMarks?: string;
+        reportMarks?: string;
+        presentationMarks?: string;
+        evaluatorName?: string;
+      };
+      ["TOTAL\n(100)"]?: string;
+      ["Max-100"]?: string;
+    };
+    return {
+      totalMarks: parsed.evaluation?.totalMarks ?? parsed["TOTAL\n(100)"] ?? parsed["Max-100"],
+      reportMarks: parsed.evaluation?.reportMarks,
+      presentationMarks: parsed.evaluation?.presentationMarks,
+      evaluatorName: parsed.evaluation?.evaluatorName,
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
@@ -191,6 +502,43 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <p className="text-lg font-semibold">{value}</p>
     </div>
   );
+}
+
+function MiniInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-slate-50 p-2">
+      <p className="text-[11px] text-muted">{label}</p>
+      <p className="text-sm font-semibold text-slate-800">{value}</p>
+    </div>
+  );
+}
+
+function getAverageMarks(
+  students: Array<{ internship: { sourceRowRawJson: string | null } | null }>,
+) {
+  const marks = students
+    .map((student) => getEvaluationSnapshot(student.internship?.sourceRowRawJson).totalMarks)
+    .map((mark) => Number(mark))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (marks.length === 0) {
+    return "-";
+  }
+  return (marks.reduce((sum, value) => sum + value, 0) / marks.length).toFixed(1);
+}
+
+function getTopCompanies(
+  students: Array<{ internship: { companyName: string } | null }>,
+) {
+  const countMap = new Map<string, number>();
+  for (const student of students) {
+    const company = student.internship?.companyName?.trim();
+    if (!company) continue;
+    countMap.set(company, (countMap.get(company) ?? 0) + 1);
+  }
+  return Array.from(countMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([name, count]) => ({ name, count }));
 }
 
 function SelectFilter({

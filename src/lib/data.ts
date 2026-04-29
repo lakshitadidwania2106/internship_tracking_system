@@ -53,6 +53,32 @@ export async function searchStudents({
   });
 }
 
+export async function getStudentsForBatchSemester(batchYear: number, semester: number) {
+  return prisma.student.findMany({
+    where: {
+      batch: { year: batchYear },
+      semesterRecord: { semester },
+    },
+    include: {
+      internship: true,
+      semesterRecord: true,
+      batch: true,
+      mapping: true,
+      documents: true,
+    },
+    orderBy: {
+      usn: "asc",
+    },
+  });
+}
+
+export async function getRecentImportJobs() {
+  return prisma.importJob.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 10,
+  });
+}
+
 export async function getStudentByUsn(usn: string) {
   return prisma.student.findUnique({
     where: { usn: usn.toUpperCase() },

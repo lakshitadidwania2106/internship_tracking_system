@@ -11,6 +11,7 @@ type ImportConfig = {
   file: string;
   sheet?: string;
   headerRowIndex?: number;
+  mode?: "internship" | "marks";
 };
 
 const prisma = new PrismaClient({
@@ -25,6 +26,15 @@ const importConfigs: ImportConfig[] = [
     file: "INTERNSHIP EVALUATION SHEET.xlsx",
     sheet: "sem 8  2020 batch",
     headerRowIndex: 0,
+    mode: "internship",
+  },
+  {
+    batchYear: 2020,
+    semester: 8,
+    file: "INTERNSHIP EVALUATION SHEET.xlsx",
+    sheet: "Marks Evaluation",
+    headerRowIndex: 7,
+    mode: "marks",
   },
   {
     batchYear: 2021,
@@ -32,6 +42,7 @@ const importConfigs: ImportConfig[] = [
     file: "21INT68-intership marks 2021.xlsx",
     sheet: "SEM 4",
     headerRowIndex: 4,
+    mode: "internship",
   },
   {
     batchYear: 2021,
@@ -39,6 +50,15 @@ const importConfigs: ImportConfig[] = [
     file: "21INT68-intership marks 2021.xlsx",
     sheet: "SEM 6",
     headerRowIndex: 4,
+    mode: "internship",
+  },
+  {
+    batchYear: 2021,
+    semester: 6,
+    file: "21INT68-intership marks 2021.xlsx",
+    sheet: "MarkSheet",
+    headerRowIndex: 4,
+    mode: "marks",
   },
 ];
 
@@ -133,15 +153,25 @@ async function importFile(config: ImportConfig) {
     }
 
     const fullName = readCell(row, ["NAME", "Student Name", "Name"]) ?? "Unknown Student";
-    const companyName = readCell(row, ["Company Name", "COMPANY NAME"]) ?? "Not Provided";
+    const companyName = readCell(row, [
+      "Company Name",
+      "COMPANY NAME",
+      "INTERNSHIP COMPANY NAME",
+    ]) ?? "Not Provided";
     const roleTitle =
-      readCell(row, ["Domain( Title)", "Job Role", "Domain", "Role"]) ?? "Intern";
+      readCell(row, ["Domain( Title)", "Job Role", "Domain", "Role", "INTERNSHIP ROLE"]) ??
+      "Intern";
     const stipend = readCell(row, ["Stipend", "STIPEND YES /NO"]);
     const duration = readCell(row, ["DURATION"]);
     const fromDate = readCell(row, ["From date", "From Date", "Start Date"]);
     const toDate = readCell(row, ["To Date", "To date", "End Date"]);
     const relevantPOs = readCell(row, ["Relevant POs"]);
     const relevantPSOs = readCell(row, ["Relevant PSOs"]);
+    const totalMarks = readCell(row, ["TOTAL\n(100)", "TOTAL (100)", "Max-100", "TOTAL"]);
+    const reportMarks = readCell(row, ["Report\n(10)", "Report (10)", "Report"]);
+    const presentationMarks = readCell(row, ["Presentation\n(10)", "Presentation (10)"]);
+    const evaluatorName = readCell(row, ["Evaluator Names"]);
+    const internshipTitle = readCell(row, ["INTERNSHIP TITLE"]);
 
     const student = await prisma.student.upsert({
       where: { usn: usn.toUpperCase() },
@@ -158,16 +188,46 @@ async function importFile(config: ImportConfig) {
       },
     });
 
+    const existingInternship = await prisma.internship.findUnique({
+      where: { studentId: student.id },
+    });
+    const existingRowRaw = existingInternship?.sourceRowRawJson
+      ? JSON.parse(existingInternship.sourceRowRawJson)
+      : {};
+
     await prisma.internship.upsert({
       where: { studentId: student.id },
       update: {
-        companyName,
-        roleTitle,
-        stipend,
-        durationText: duration,
-        startDateRaw: fromDate,
-        endDateRaw: toDate,
-        sourceRowRawJson: JSON.stringify(row),
+        companyName: config.mode === "marks" ? existingInternship?.companyName ?? companyName : companyName,
+        roleTitle:
+          config.mode === "marks"
+            ? existingInternship?.roleTitle ?? roleTitle
+            : roleTitle,
+        stipend: config.mode === "marks" ? existingInternship?.stipend ?? stipend : stipend,
+        durationText:
+          config.mode === "marks"
+            ? existingInternship?.durationText ?? duration
+            : duration,
+        startDateRaw:
+          config.mode === "marks"
+            ? existingInternship?.startDateRaw ?? fromDate
+            : fromDate,
+        endDateRaw:
+          config.mode === "marks"
+            ? existingInternship?.endDateRaw ?? toDate
+            : toDate,
+        grade: totalMarks ? `Total: ${totalMarks}` : existingInternship?.grade,
+        sourceRowRawJson: JSON.stringify({
+          ...existingRowRaw,
+          ...row,
+          evaluation: {
+            totalMarks,
+            reportMarks,
+            presentationMarks,
+            evaluatorName,
+            internshipTitle,
+          },
+        }),
       },
       create: {
         studentId: student.id,
@@ -177,7 +237,17 @@ async function importFile(config: ImportConfig) {
         durationText: duration,
         startDateRaw: fromDate,
         endDateRaw: toDate,
-        sourceRowRawJson: JSON.stringify(row),
+        grade: totalMarks ? `Total: ${totalMarks}` : null,
+        sourceRowRawJson: JSON.stringify({
+          ...row,
+          evaluation: {
+            totalMarks,
+            reportMarks,
+            presentationMarks,
+            evaluatorName,
+            internshipTitle,
+          },
+        }),
       },
     });
 
