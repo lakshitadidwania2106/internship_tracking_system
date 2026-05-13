@@ -63,6 +63,15 @@ Then run:
 npm run import:excel
 ```
 
+## Upload From Website (Scalable for new years)
+
+Use the `Settings` tab in the portal and open `Upload New Batch/Sem Data`.
+
+- Upload Excel/CSV for new batches and semesters
+- Enter batch year + semester + optional sheet/header/course info
+- The system auto-creates missing batch/semester records and imports rows
+- You can also upload report files (`.pdf`, `.doc`, `.docx`, `.txt`) for later USN-based download matching
+
 ## Linking Student Report Files
 
 Place report/software-copy files in:

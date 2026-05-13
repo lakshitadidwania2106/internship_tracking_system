@@ -79,6 +79,24 @@ export async function getRecentImportJobs() {
   });
 }
 
+export async function getBatchSemesterMapFromDb() {
+  const batches = await prisma.batch.findMany({
+    include: {
+      semesters: {
+        select: { semester: true },
+        orderBy: { semester: "asc" },
+      },
+    },
+    orderBy: { year: "asc" },
+  });
+
+  const map: Record<number, number[]> = {};
+  for (const batch of batches) {
+    map[batch.year] = batch.semesters.map((semester) => semester.semester);
+  }
+  return map;
+}
+
 export async function getStudentByUsn(usn: string) {
   return prisma.student.findUnique({
     where: { usn: usn.toUpperCase() },

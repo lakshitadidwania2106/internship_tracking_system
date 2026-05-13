@@ -1,7 +1,8 @@
 import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS } from "@/lib/constants";
 import { CO_JUSTIFICATIONS, CO_PO_PSO_COLUMNS, CO_PO_PSO_MATRIX, INTERNSHIP_COS } from "@/lib/co-po-pso";
-import { getDashboardStats, getRecentImportJobs, getStudentsForBatchSemester, searchStudents } from "@/lib/data";
+import { getBatchSemesterMapFromDb, getDashboardStats, getRecentImportJobs, getStudentsForBatchSemester, searchStudents } from "@/lib/data";
 import { ChatAssistant } from "@/components/chat-assistant";
+import { DataUploadPanel } from "@/components/data-upload-panel";
 import { BookOpenCheck, CalendarDays, Download, GraduationCap, Search, User } from "lucide-react";
 import Image from "next/image";
 
@@ -17,11 +18,17 @@ type PageProps = {
 export default async function Home({ searchParams }: PageProps) {
   const filters = await searchParams;
   const activeTab = (filters.tab ?? "overview").toLowerCase();
-  const selectedBatch = Number(filters.batch) || 2020;
-  const availableSemesters = BATCH_SEMESTER_MAP[selectedBatch] ?? [];
+  const usnQuery = filters.usn?.trim() ?? "";
+
+  const dbBatchMap = await getBatchSemesterMapFromDb();
+  const effectiveBatchMap = Object.keys(dbBatchMap).length > 0 ? dbBatchMap : BATCH_SEMESTER_MAP;
+  const batchOptions = Object.keys(effectiveBatchMap)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const selectedBatch = Number(filters.batch) || batchOptions[0] || 2020;
+  const availableSemesters = effectiveBatchMap[selectedBatch] ?? [];
   const selectedSemester =
     Number(filters.semester) || (availableSemesters.length > 0 ? availableSemesters[0] : 8);
-  const usnQuery = filters.usn?.trim() ?? "";
 
   const [students, allStudents, stats, importJobs] = await Promise.all([
     searchStudents({
@@ -93,7 +100,7 @@ export default async function Home({ searchParams }: PageProps) {
           </header>
 
           <form className="mb-6 grid gap-3 md:grid-cols-4">
-            <SelectFilter name="batch" value={String(selectedBatch)} options={["2020", "2021"]} />
+            <SelectFilter name="batch" value={String(selectedBatch)} options={batchOptions.map(String)} />
             <SelectFilter
               name="semester"
               value={String(selectedSemester)}
@@ -341,6 +348,7 @@ export default async function Home({ searchParams }: PageProps) {
 
           {activeTab === "settings" ? (
             <section className="space-y-4">
+              <DataUploadPanel />
               <div className="rounded-xl border border-border bg-white p-4">
                 <h3 className="mb-3 text-lg font-semibold">Portal Settings & Data Sources</h3>
                 <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
