@@ -22,33 +22,60 @@ model Batch {
 }
 
 model SemesterRecord {
-  id         Int       @id @default(autoincrement())
-  semester   Int
-  courseCode String
-  courseName String
-  credits    Int
-  batchId    Int
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  batch      Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  students   Student[]
+  id          Int       @id @default(autoincrement())
+  semester    Int
+  courseCode  String
+  courseName  String
+  credits     Int
+  reviewCount Int       @default(3)
+  batchId     Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  batch       Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  students    Student[]
 
   @@unique([batchId, semester])
 }
 
 model Student {
-  id               Int              @id @default(autoincrement())
-  usn              String           @unique
+  id               Int                @id @default(autoincrement())
+  usn              String             @unique
   fullName         String
   batchId          Int
   semesterRecordId Int
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  batch            Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  semesterRecord   SemesterRecord   @relation(fields: [semesterRecordId], references: [id], onDelete: Cascade)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  batch            Batch              @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  semesterRecord   SemesterRecord     @relation(fields: [semesterRecordId], references: [id], onDelete: Cascade)
   internship       Internship?
   mapping          OutcomeMapping?
   documents        StudentDocument[]
+  reviewMarks      StudentReviewMark[]
+}
+
+model StudentReviewMark {
+  id           Int      @id @default(autoincrement())
+  studentId    Int
+  reviewNumber Int
+  rowJson      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, reviewNumber])
+}
+
+/// Metadata for blobs in R2 (or local fallback). Only `storageKey` references the object body.
+model StoredFile {
+  id           Int      @id @default(autoincrement())
+  kind         String
+  batchYear    Int
+  semester     Int
+  storageKey   String
+  originalName String?
+  contentType  String?
+  byteSize     Int?
+  createdAt    DateTime @default(now())
 }
 
 model Internship {
@@ -86,7 +113,10 @@ model StudentDocument {
   studentId     Int
   documentType  String
   fileLabel     String
+  /// Legacy on-disk path under data/imports/reports (used when storageKey is null).
   storagePath   String
+  /// Object storage key (R2 or local fallback); PDF bytes live here when set.
+  storageKey    String?
   originalName  String?
   uploadedAtRaw String?
   createdAt     DateTime @default(now())

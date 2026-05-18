@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { getObjectBytes } from "@/lib/r2";
 
 async function listFilesRecursive(dir: string): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -19,6 +21,31 @@ async function listFilesRecursive(dir: string): Promise<string[]> {
 export async function GET(_: Request, context: { params: Promise<{ usn: string }> }) {
   const { usn } = await context.params;
   const normalizedUsn = usn.toUpperCase();
+
+  const student = await prisma.student.findUnique({
+    where: { usn: normalizedUsn },
+    include: {
+      documents: { orderBy: { updatedAt: "desc" } },
+    },
+  });
+
+  const storedPdf = student?.documents.find((d) => d.storageKey && /\.pdf$/i.test(d.fileLabel));
+  if (storedPdf?.storageKey) {
+    try {
+      const { buffer, contentType } = await getObjectBytes(storedPdf.storageKey);
+      const downloadName = storedPdf.fileLabel.replace(/"/g, "");
+      const resolvedType = contentType ?? "application/pdf";
+      return new NextResponse(new Uint8Array(buffer), {
+        headers: {
+          "Content-Type": resolvedType,
+          "Content-Disposition": `attachment; filename="${downloadName}"`,
+        },
+      });
+    } catch {
+      // Fall through to filesystem search.
+    }
+  }
+
   const candidateDirs = [
     path.join(process.cwd(), "data", "imports", "reports"),
     path.join(process.cwd(), "data", "imports", "excel"),
@@ -45,7 +72,7 @@ export async function GET(_: Request, context: { params: Promise<{ usn: string }
       return NextResponse.json(
         {
           message:
-            "No report found for this USN. Add PDF/DOC/DOCX in data/imports/reports and include USN in filename.",
+            "No report found for this USN. Upload a ZIP via Data Management or add files under data/imports/reports.",
         },
         { status: 404 },
       );
@@ -60,9 +87,6 @@ export async function GET(_: Request, context: { params: Promise<{ usn: string }
       },
     });
   } catch {
-    return NextResponse.json(
-      { message: "Could not read report directory." },
-      { status: 500 },
-    );
+    return NextResponse.json({ message: "Could not read report directory." }, { status: 500 });
   }
 }

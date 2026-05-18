@@ -26,5 +26,25 @@ export const DASHBOARD_LINKS = [
   "Students",
   "Internships",
   "Analytics",
+  "Data Management",
   "Settings",
 ];
+
+export const MARK_UPLOAD_KINDS = [
+  "review_1",
+  "review_2",
+  "review_3",
+  "final",
+  "internship_details",
+] as const;
+
+export type MarkUploadKind = (typeof MARK_UPLOAD_KINDS)[number];
+
+export const STORED_FILE_KIND = {
+  REVIEW_1_XLSX: "review_1_xlsx",
+  REVIEW_2_XLSX: "review_2_xlsx",
+  REVIEW_3_XLSX: "review_3_xlsx",
+  FINAL_MARKS_XLSX: "final_marks_xlsx",
+  INTERNSHIP_DETAILS_XLSX: "internship_details_xlsx",
+  REPORTS_ZIP: "reports_zip",
+} as const;

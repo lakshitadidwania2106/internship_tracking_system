@@ -6,7 +6,10 @@ import { prisma } from "@/lib/prisma";
 export type ImportMode = "internship" | "marks";
 
 export type ImportExcelOptions = {
-  filePath: string;
+  filePath?: string;
+  buffer?: Buffer;
+  /** Display name for import logs (defaults from file path or "upload.xlsx"). */
+  sourceFileName?: string;
   batchYear: number;
   semester: number;
   sheetName?: string;
@@ -15,6 +18,8 @@ export type ImportExcelOptions = {
   courseCode?: string;
   courseName?: string;
   credits?: number;
+  /** When set, rows update `StudentReviewMark` instead of internship/outcome rows. */
+  reviewNumber?: 1 | 2 | 3;
 };
 
 function readCell(record: Record<string, unknown>, candidates: string[]): string | undefined {
@@ -44,6 +49,7 @@ export async function ensureBatchSemester(options: {
   courseCode?: string;
   courseName?: string;
   credits?: number;
+  reviewCount?: number;
 }) {
   const batch = await prisma.batch.upsert({
     where: { year: options.batchYear },
@@ -68,6 +74,7 @@ export async function ensureBatchSemester(options: {
       courseCode: course.code,
       courseName: course.name,
       credits: course.credits,
+      ...(options.reviewCount !== undefined ? { reviewCount: options.reviewCount } : {}),
     },
     create: {
       batchId: batch.id,
@@ -75,17 +82,45 @@ export async function ensureBatchSemester(options: {
       courseCode: course.code,
       courseName: course.name,
       credits: course.credits,
+      reviewCount: options.reviewCount ?? 3,
     },
   });
 
   return { batch, semesterRecord };
 }
 
-export async function importExcelFile(options: ImportExcelOptions) {
+async function loadWorkbookBuffer(options: ImportExcelOptions): Promise<{ buffer: Buffer; label: string }> {
+  if (options.buffer) {
+    return {
+      buffer: options.buffer,
+      label: options.sourceFileName ?? path.basename(options.filePath ?? "upload.xlsx"),
+    };
+  }
+  if (!options.filePath) {
+    throw new Error("Either buffer or filePath is required.");
+  }
   if (!fs.existsSync(options.filePath)) {
     throw new Error(`File not found: ${options.filePath}`);
   }
+  const buffer = await fs.promises.readFile(options.filePath);
+  return {
+    buffer,
+    label: options.sourceFileName ?? path.basename(options.filePath),
+  };
+}
 
+export async function importExcelFile(options: ImportExcelOptions) {
+  const { buffer, label } = await loadWorkbookBuffer(options);
+  return runExcelImport({
+    ...options,
+    buffer,
+    sourceFileName: label,
+  });
+}
+
+export async function runExcelImport(
+  options: ImportExcelOptions & { buffer: Buffer; sourceFileName: string },
+) {
   const { batch, semesterRecord } = await ensureBatchSemester({
     batchYear: options.batchYear,
     semester: options.semester,
@@ -94,7 +129,7 @@ export async function importExcelFile(options: ImportExcelOptions) {
     credits: options.credits,
   });
 
-  const workbook = xlsx.readFile(options.filePath);
+  const workbook = xlsx.read(options.buffer, { type: "buffer" });
   const selectedSheetName = options.sheetName ?? workbook.SheetNames[0];
   const sheet = workbook.Sheets[selectedSheetName];
   if (!sheet) {
@@ -119,26 +154,14 @@ export async function importExcelFile(options: ImportExcelOptions) {
   });
 
   let imported = 0;
+  const mode = options.mode ?? "internship";
+  const reviewNumber = options.reviewNumber;
+
   for (const row of rows) {
     const usn = readCell(row, ["USN", "Usn"]);
     if (!usn) continue;
 
     const fullName = readCell(row, ["NAME", "Student Name", "Name"]) ?? "Unknown Student";
-    const companyName =
-      readCell(row, ["Company Name", "COMPANY NAME", "INTERNSHIP COMPANY NAME"]) ?? "Not Provided";
-    const roleTitle =
-      readCell(row, ["Domain( Title)", "Job Role", "Domain", "Role", "INTERNSHIP ROLE"]) ?? "Intern";
-    const stipend = readCell(row, ["Stipend", "STIPEND YES /NO"]);
-    const duration = readCell(row, ["DURATION"]);
-    const fromDate = readCell(row, ["From date", "From Date", "Start Date"]);
-    const toDate = readCell(row, ["To Date", "To date", "End Date"]);
-    const relevantPOs = readCell(row, ["Relevant POs"]);
-    const relevantPSOs = readCell(row, ["Relevant PSOs"]);
-    const totalMarks = readCell(row, ["TOTAL\n(100)", "TOTAL (100)", "Max-100", "TOTAL"]);
-    const reportMarks = readCell(row, ["Report\n(10)", "Report (10)", "Report"]);
-    const presentationMarks = readCell(row, ["Presentation\n(10)", "Presentation (10)"]);
-    const evaluatorName = readCell(row, ["Evaluator Names"]);
-    const internshipTitle = readCell(row, ["INTERNSHIP TITLE"]);
 
     const student = await prisma.student.upsert({
       where: { usn: usn.toUpperCase() },
@@ -155,10 +178,46 @@ export async function importExcelFile(options: ImportExcelOptions) {
       },
     });
 
+    if (reviewNumber) {
+      await prisma.studentReviewMark.upsert({
+        where: {
+          studentId_reviewNumber: {
+            studentId: student.id,
+            reviewNumber,
+          },
+        },
+        update: {
+          rowJson: JSON.stringify(row),
+        },
+        create: {
+          studentId: student.id,
+          reviewNumber,
+          rowJson: JSON.stringify(row),
+        },
+      });
+      imported += 1;
+      continue;
+    }
+
+    const companyName =
+      readCell(row, ["Company Name", "COMPANY NAME", "INTERNSHIP COMPANY NAME"]) ?? "Not Provided";
+    const roleTitle =
+      readCell(row, ["Domain( Title)", "Job Role", "Domain", "Role", "INTERNSHIP ROLE"]) ?? "Intern";
+    const stipend = readCell(row, ["Stipend", "STIPEND YES /NO"]);
+    const duration = readCell(row, ["DURATION"]);
+    const fromDate = readCell(row, ["From date", "From Date", "Start Date"]);
+    const toDate = readCell(row, ["To Date", "To date", "End Date"]);
+    const relevantPOs = readCell(row, ["Relevant POs"]);
+    const relevantPSOs = readCell(row, ["Relevant PSOs"]);
+    const totalMarks = readCell(row, ["TOTAL\n(100)", "TOTAL (100)", "Max-100", "TOTAL"]);
+    const reportMarks = readCell(row, ["Report\n(10)", "Report (10)", "Report"]);
+    const presentationMarks = readCell(row, ["Presentation\n(10)", "Presentation (10)"]);
+    const evaluatorName = readCell(row, ["Evaluator Names"]);
+    const internshipTitle = readCell(row, ["INTERNSHIP TITLE"]);
+
     const existingInternship = await prisma.internship.findUnique({ where: { studentId: student.id } });
     const existingRowRaw =
       existingInternship?.sourceRowRawJson ? JSON.parse(existingInternship.sourceRowRawJson) : {};
-    const mode = options.mode ?? "internship";
 
     await prisma.internship.upsert({
       where: { studentId: student.id },
@@ -212,7 +271,7 @@ export async function importExcelFile(options: ImportExcelOptions) {
 
   await prisma.importJob.create({
     data: {
-      sourceFileName: path.basename(options.filePath),
+      sourceFileName: options.sourceFileName,
       batchYear: options.batchYear,
       semester: options.semester,
       status: "completed",

@@ -2,6 +2,7 @@ import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS } from "@/lib/constants";
 import { CO_JUSTIFICATIONS, CO_PO_PSO_COLUMNS, CO_PO_PSO_MATRIX, INTERNSHIP_COS } from "@/lib/co-po-pso";
 import { getBatchSemesterMapFromDb, getDashboardStats, getRecentImportJobs, getStudentsForBatchSemester, searchStudents } from "@/lib/data";
 import { ChatAssistant } from "@/components/chat-assistant";
+import { DataManagementPanel } from "@/components/data-management-panel";
 import { DataUploadPanel } from "@/components/data-upload-panel";
 import { BookOpenCheck, CalendarDays, Download, GraduationCap, Search, User } from "lucide-react";
 import Image from "next/image";
@@ -69,7 +70,7 @@ export default async function Home({ searchParams }: PageProps) {
               {DASHBOARD_LINKS.map((item) => (
                 <a
                   key={item}
-                  href={`/?tab=${item.toLowerCase()}&batch=${selectedBatch}&semester=${selectedSemester}&usn=${encodeURIComponent(usnQuery)}`}
+                  href={`/?tab=${encodeURIComponent(item.toLowerCase())}&batch=${selectedBatch}&semester=${selectedSemester}&usn=${encodeURIComponent(usnQuery)}`}
                   className={`rounded-full px-3 py-1 ${
                     activeTab === item.toLowerCase() ? "bg-white font-semibold text-[var(--dsce-blue)]" : ""
                   }`}
@@ -195,6 +196,12 @@ export default async function Home({ searchParams }: PageProps) {
                   <MiniInfo label="Report (10)" value={evaluation.reportMarks ?? "-"} />
                   <MiniInfo label="Presentation (10)" value={evaluation.presentationMarks ?? "-"} />
                 </div>
+                {selectedStudent?.reviewMarks?.length ? (
+                  <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
+                    Review uploads on record:{" "}
+                    {selectedStudent.reviewMarks.map((m) => `R${m.reviewNumber}`).join(", ")}
+                  </div>
+                ) : null}
               </div>
               <div className="rounded-xl border border-border bg-white p-4">
                 <h4 className="mb-3 font-semibold">Students In Selection</h4>
@@ -354,6 +361,7 @@ export default async function Home({ searchParams }: PageProps) {
                 <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
                   <li>Excel imports path: data/imports/excel</li>
                   <li>Reports path: data/imports/reports</li>
+                  <li>Object storage: configure Cloudflare R2 env vars for production uploads</li>
                   <li>Chat assistant mode: DB-first with Ollama fallback</li>
                   <li>Current filter default: Batch {selectedBatch}, Semester {selectedSemester}</li>
                 </ul>
@@ -388,6 +396,13 @@ export default async function Home({ searchParams }: PageProps) {
             </section>
           ) : null}
 
+          {activeTab === "data management" ? (
+            <section className="rounded-2xl border border-border bg-[#eef6fb] p-5 shadow-inner sm:p-8">
+              <DataManagementPanel />
+            </section>
+          ) : null}
+
+          {activeTab !== "data management" ? (
           <section className="mt-6 space-y-4">
             <div className="rounded-xl border border-border bg-white p-4">
               <h3 className="mb-3 inline-flex items-center gap-2 text-lg font-semibold">
@@ -464,6 +479,7 @@ export default async function Home({ searchParams }: PageProps) {
               </div>
             </div>
           </section>
+          ) : null}
         </div>
         <ChatAssistant />
       </main>

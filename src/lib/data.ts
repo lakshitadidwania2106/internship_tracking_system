@@ -45,6 +45,7 @@ export async function searchStudents({
       batch: true,
       mapping: true,
       documents: true,
+      reviewMarks: { orderBy: { reviewNumber: "asc" } },
     },
     take: 50,
     orderBy: {
@@ -65,6 +66,7 @@ export async function getStudentsForBatchSemester(batchYear: number, semester: n
       batch: true,
       mapping: true,
       documents: true,
+      reviewMarks: { orderBy: { reviewNumber: "asc" } },
     },
     orderBy: {
       usn: "asc",
@@ -106,6 +108,46 @@ export async function getStudentByUsn(usn: string) {
       batch: true,
       mapping: true,
       documents: true,
+      reviewMarks: { orderBy: { reviewNumber: "asc" } },
     },
+  });
+}
+
+export async function getStudentById(id: number) {
+  return prisma.student.findUnique({
+    where: { id },
+    include: {
+      internship: true,
+      semesterRecord: true,
+      batch: true,
+      mapping: true,
+      documents: true,
+      reviewMarks: { orderBy: { reviewNumber: "asc" } },
+    },
+  });
+}
+
+export async function listBatchesDetailed() {
+  return prisma.batch.findMany({
+    include: {
+      semesters: {
+        orderBy: { semester: "asc" },
+      },
+      _count: { select: { students: true } },
+    },
+    orderBy: { year: "asc" },
+  });
+}
+
+export async function listStudentsForBatchYear(batchYear: number) {
+  return prisma.student.findMany({
+    where: { batch: { year: batchYear } },
+    include: {
+      internship: true,
+      semesterRecord: true,
+      batch: true,
+      reviewMarks: { orderBy: { reviewNumber: "asc" } },
+    },
+    orderBy: { usn: "asc" },
   });
 }
