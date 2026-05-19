@@ -362,7 +362,7 @@ export default async function Home({ searchParams }: PageProps) {
                   <li>Excel imports path: data/imports/excel</li>
                   <li>Reports path: data/imports/reports</li>
                   <li>Object storage: configure Cloudflare R2 env vars for production uploads</li>
-                  <li>Chat assistant mode: DB-first with Ollama fallback</li>
+                  <li>InternBot: ML intent classifier + per-student CO/PO/PSO engine (Ollama optional)</li>
                   <li>Current filter default: Batch {selectedBatch}, Semester {selectedSemester}</li>
                 </ul>
               </div>
@@ -481,7 +481,10 @@ export default async function Home({ searchParams }: PageProps) {
           </section>
           ) : null}
         </div>
-        <ChatAssistant />
+        <ChatAssistant
+          selectedUsn={selectedStudent?.usn}
+          selectedName={selectedStudent?.fullName}
+        />
       </main>
     </div>
   );

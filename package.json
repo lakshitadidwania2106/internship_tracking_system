@@ -9,7 +9,10 @@
     "lint": "eslint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:setup": "prisma migrate deploy && npm run db:seed",
     "db:seed": "tsx prisma/seed.ts",
+    "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true}); try{require('fs').unlinkSync('dev.db')}catch(e){}\" && next dev",
     "import:excel": "tsx scripts/import-excel.ts"
   },
   "dependencies": {
