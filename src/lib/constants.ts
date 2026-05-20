@@ -26,6 +26,7 @@ export const DASHBOARD_LINKS = [
   "Students",
   "Internships",
   "Analytics",
+  "Status",
   "Data Management",
   "Settings",
 ];

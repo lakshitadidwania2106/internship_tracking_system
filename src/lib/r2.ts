@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -96,4 +96,24 @@ export async function getObjectBytes(key: string): Promise<{ buffer: Buffer; con
   const fullPath = path.join(localRoot(), key);
   const buffer = await fs.readFile(fullPath);
   return { buffer };
+}
+
+export async function deleteObjectBytes(key: string) {
+  if (isR2Configured()) {
+    const client = getS3Client();
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: process.env.R2_BUCKET_NAME!,
+        Key: key,
+      }),
+    );
+    return;
+  }
+
+  const fullPath = path.join(localRoot(), key);
+  try {
+    await fs.unlink(fullPath);
+  } catch {
+    // File may already be gone.
+  }
 }

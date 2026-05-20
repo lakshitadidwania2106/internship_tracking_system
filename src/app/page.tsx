@@ -1,10 +1,19 @@
 import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS } from "@/lib/constants";
-import { CO_JUSTIFICATIONS, CO_PO_PSO_COLUMNS, CO_PO_PSO_MATRIX, INTERNSHIP_COS } from "@/lib/co-po-pso";
-import { getBatchSemesterMapFromDb, getDashboardStats, getRecentImportJobs, getStudentsForBatchSemester, searchStudents } from "@/lib/data";
+import {
+  getBatchSemesterMapFromDb,
+  getDashboardStats,
+  getRecentImportJobs,
+  getStudentsForBatchSemester,
+  resolveDashboardFilters,
+  searchStudents,
+} from "@/lib/data";
+import { DashboardFilters } from "@/components/dashboard-filters";
 import { ChatAssistant } from "@/components/chat-assistant";
 import { DataManagementPanel } from "@/components/data-management-panel";
 import { DataUploadPanel } from "@/components/data-upload-panel";
-import { BookOpenCheck, CalendarDays, Download, GraduationCap, Search, User } from "lucide-react";
+import { StatusPanel } from "@/components/status-panel";
+import { StudentInternshipSummary } from "@/components/student-internship-summary";
+import { CalendarDays, Download, User } from "lucide-react";
 import Image from "next/image";
 
 type PageProps = {
@@ -19,23 +28,30 @@ type PageProps = {
 export default async function Home({ searchParams }: PageProps) {
   const filters = await searchParams;
   const activeTab = (filters.tab ?? "overview").toLowerCase();
-  const usnQuery = filters.usn?.trim() ?? "";
 
   const dbBatchMap = await getBatchSemesterMapFromDb();
   const effectiveBatchMap = Object.keys(dbBatchMap).length > 0 ? dbBatchMap : BATCH_SEMESTER_MAP;
+
+  const resolved = await resolveDashboardFilters({
+    batch: filters.batch,
+    semester: filters.semester,
+    usn: filters.usn,
+    batchMap: effectiveBatchMap,
+  });
+
+  const selectedBatch = resolved.batchYear;
+  const selectedSemester = resolved.semester;
+  const usnQuery = resolved.usnQuery;
   const batchOptions = Object.keys(effectiveBatchMap)
     .map(Number)
     .sort((a, b) => a - b);
-  const selectedBatch = Number(filters.batch) || batchOptions[0] || 2020;
   const availableSemesters = effectiveBatchMap[selectedBatch] ?? [];
-  const selectedSemester =
-    Number(filters.semester) || (availableSemesters.length > 0 ? availableSemesters[0] : 8);
 
   const [students, allStudents, stats, importJobs] = await Promise.all([
     searchStudents({
       batchYear: selectedBatch,
       semester: selectedSemester,
-      usn: usnQuery || undefined,
+      query: usnQuery || undefined,
     }),
     getStudentsForBatchSemester(selectedBatch, selectedSemester),
     getDashboardStats(selectedBatch, selectedSemester),
@@ -100,35 +116,28 @@ export default async function Home({ searchParams }: PageProps) {
             </div>
           </header>
 
-          <form className="mb-6 grid gap-3 md:grid-cols-4">
-            <SelectFilter name="batch" value={String(selectedBatch)} options={batchOptions.map(String)} />
-            <SelectFilter
-              name="semester"
-              value={String(selectedSemester)}
-              options={availableSemesters.map(String)}
-            />
-            <div className="relative md:col-span-2">
-              <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-              <input
-                name="usn"
-                defaultValue={usnQuery}
-                placeholder="Enter USN (e.g., 1DS21AI001)"
-                className="w-full rounded-lg border border-border bg-white py-2.5 pl-10 pr-3 text-sm outline-none ring-primary/20 focus:ring"
-              />
-            </div>
-            <button
-              type="submit"
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 md:col-start-4"
-            >
-              Search Student
-            </button>
-          </form>
+          <DashboardFilters
+            batchYear={selectedBatch}
+            semester={selectedSemester}
+            usn={usnQuery}
+            tab={activeTab}
+            batchOptions={batchOptions}
+            semesterOptions={availableSemesters}
+            contextAdjusted={resolved.contextAdjusted}
+          />
 
           {activeTab === "overview" ? (
             <section className="grid gap-4 lg:grid-cols-3">
             <article className="rounded-xl border border-border bg-white p-4 lg:col-span-2">
               {!selectedStudent ? (
-                <p className="text-sm text-muted">No students found for this filter.</p>
+                <div className="space-y-2 text-sm text-muted">
+                  <p>No students found for batch {selectedBatch}, semester {selectedSemester}.</p>
+                  {usnQuery ? (
+                    <p>Try another USN/name, or switch to batch 2022 / 2021 where imported data exists.</p>
+                  ) : (
+                    <p>Select batch 2022 or 2021, or search by USN — search works across all batches.</p>
+                  )}
+                </div>
               ) : (
                 <>
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-4">
@@ -161,20 +170,12 @@ export default async function Home({ searchParams }: PageProps) {
                     />
                     <InfoItem label="Grade" value={selectedStudent.internship?.grade ?? "Not assigned"} />
                   </div>
+                  <StudentInternshipSummary usn={selectedStudent.usn} />
                 </>
               )}
             </article>
 
             <aside className="space-y-4">
-              <div className="rounded-xl border border-border bg-white p-4">
-                <h4 className="mb-3 font-semibold">Student CO-PO-PSO Snapshot</h4>
-                <MappingRow label="Relevant POs" value={selectedStudent?.mapping?.relevantPOs} />
-                <MappingRow label="Relevant PSOs" value={selectedStudent?.mapping?.relevantPSOs} />
-                <MappingRow
-                  label="Summary"
-                  value={selectedStudent?.mapping?.coMappingSummary ?? "Use InternBot for CO-wise justification details."}
-                />
-              </div>
               <div className="rounded-xl border border-border bg-white p-4">
                 <h4 className="mb-3 font-semibold">Internship Report</h4>
                 {selectedStudent ? (
@@ -312,44 +313,16 @@ export default async function Home({ searchParams }: PageProps) {
                 <MetricCard label="Unique Companies" value={String(new Set(allStudents.map((s) => s.internship?.companyName).filter(Boolean)).size)} />
                 <MetricCard label="Selected Batch/Sem" value={`${selectedBatch} / ${selectedSemester}`} />
               </div>
-              <div className="rounded-xl border border-border bg-white p-4">
-                <h3 className="mb-3 text-lg font-semibold">CO-PO-PSO Mapping Matrix (1-3 Scale)</h3>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full border-collapse text-xs sm:text-sm">
-                    <thead>
-                      <tr className="bg-slate-100">
-                        <th className="border border-border px-2 py-2 text-left font-semibold">CO / PO</th>
-                        {CO_PO_PSO_COLUMNS.map((column) => (
-                          <th key={column} className="border border-border px-2 py-2 font-semibold">{column}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.entries(CO_PO_PSO_MATRIX).map(([co, values]) => (
-                        <tr key={co}>
-                          <td className="border border-border px-2 py-2 font-semibold text-primary">{co}</td>
-                          {values.map((value, index) => (
-                            <td
-                              key={`${co}-${CO_PO_PSO_COLUMNS[index]}`}
-                              className={`border border-border px-2 py-2 text-center ${
-                                value === "3"
-                                  ? "bg-emerald-100 font-semibold text-emerald-800"
-                                  : value === "2"
-                                    ? "bg-amber-50 text-amber-700"
-                                    : value === "1"
-                                      ? "bg-blue-50 text-blue-700"
-                                      : "text-slate-500"
-                              }`}
-                            >
-                              {value}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            </section>
+          ) : null}
+
+          {activeTab === "status" ? (
+            <section className="rounded-2xl border border-border bg-[#f8fafc] p-5 sm:p-8">
+              <StatusPanel
+                initialBatchYear={selectedBatch}
+                initialSemester={selectedSemester}
+                batchOptions={batchOptions}
+              />
             </section>
           ) : null}
 
@@ -400,85 +373,6 @@ export default async function Home({ searchParams }: PageProps) {
             <section className="rounded-2xl border border-border bg-[#eef6fb] p-5 shadow-inner sm:p-8">
               <DataManagementPanel />
             </section>
-          ) : null}
-
-          {activeTab !== "data management" ? (
-          <section className="mt-6 space-y-4">
-            <div className="rounded-xl border border-border bg-white p-4">
-              <h3 className="mb-3 inline-flex items-center gap-2 text-lg font-semibold">
-                <GraduationCap className="h-5 w-5 text-primary" />
-                Course Outcomes (Internship)
-              </h3>
-              <div className="grid gap-3 md:grid-cols-2">
-                {INTERNSHIP_COS.map((co) => (
-                  <div key={co.id} className="rounded-lg border border-border bg-slate-50 p-3">
-                    <p className="text-sm font-semibold text-primary">{co.id}</p>
-                    <p className="text-sm text-slate-700">{co.title}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-white p-4">
-              <h3 className="mb-3 inline-flex items-center gap-2 text-lg font-semibold">
-                <BookOpenCheck className="h-5 w-5 text-primary" />
-                CO-PO-PSO Mapping Matrix (1-3 Scale)
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse text-xs sm:text-sm">
-                  <thead>
-                    <tr className="bg-slate-100">
-                      <th className="border border-border px-2 py-2 text-left font-semibold">CO / PO</th>
-                      {CO_PO_PSO_COLUMNS.map((column) => (
-                        <th key={column} className="border border-border px-2 py-2 font-semibold">{column}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(CO_PO_PSO_MATRIX).map(([co, values]) => (
-                      <tr key={co}>
-                        <td className="border border-border px-2 py-2 font-semibold text-primary">{co}</td>
-                        {values.map((value, index) => (
-                          <td
-                            key={`${co}-${CO_PO_PSO_COLUMNS[index]}`}
-                            className={`border border-border px-2 py-2 text-center ${
-                              value === "3"
-                                ? "bg-emerald-100 font-semibold text-emerald-800"
-                                : value === "2"
-                                  ? "bg-amber-50 text-amber-700"
-                                  : value === "1"
-                                    ? "bg-blue-50 text-blue-700"
-                                    : "text-slate-500"
-                            }`}
-                          >
-                            {value}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-white p-4">
-              <h3 className="mb-3 text-lg font-semibold">Justification for CO-PO-PSO Mapping</h3>
-              <div className="space-y-3">
-                {CO_JUSTIFICATIONS.map((item) => (
-                  <details key={item.co} className="rounded-lg border border-border bg-slate-50 p-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-                      {item.co}: {item.heading}
-                    </summary>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                      {item.points.map((point) => (
-                        <li key={point}>{point}</li>
-                      ))}
-                    </ul>
-                  </details>
-                ))}
-              </div>
-            </div>
-          </section>
           ) : null}
         </div>
         <ChatAssistant />
@@ -594,15 +488,6 @@ function InfoItem({ label, value }: { label: string; value: string }) {
     <div>
       <p className="text-xs text-muted">{label}</p>
       <p className="text-sm font-medium text-slate-800">{value}</p>
-    </div>
-  );
-}
-
-function MappingRow({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className="mb-3 text-sm">
-      <p className="text-xs text-muted">{label}</p>
-      <p className="mt-0.5 text-slate-700">{value || "-"}</p>
     </div>
   );
 }
