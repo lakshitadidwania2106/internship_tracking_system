@@ -7,6 +7,7 @@ type ChatMessage = {
   role: "user" | "assistant";
   text: string;
   mode?: string;
+  intent?: string;
 };
 
 type ChatAssistantProps = {
@@ -15,9 +16,9 @@ type ChatAssistantProps = {
 };
 
 const SUGGESTED_PROMPTS = [
-  "Show CO PO PSO mapping for this student",
-  "What are the relevant POs and PSOs?",
-  "Explain CO1 justification for this intern",
+  "Show mapping for this student",
+  "Explain CO2 for this student",
+  "Why is PO5 mapped for this student?",
 ];
 
 export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps) {
@@ -49,19 +50,42 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
     setLoading(true);
 
     try {
+      const priorUserTurns = messages
+        .filter((m) => m.role === "user")
+        .map((m) => m.text)
+        .slice(-4);
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, usn: selectedUsn }),
+        body: JSON.stringify({
+          question: text,
+          usn: selectedUsn,
+          history: priorUserTurns,
+        }),
       });
 
       const data = (await response.json()) as {
         answer?: string;
         mode?: string;
+<<<<<<< HEAD
         message?: string;
+=======
+        intent?: string;
+        debug?: {
+          responsePath?: string;
+          primaryUsn?: string;
+          intentSource?: string;
+          fallbackTriggered?: boolean;
+        };
+>>>>>>> ff54da8 (fixed chatbot routing and imported student database)
       };
       if (!response.ok) {
         throw new Error(data.message ?? "Request failed");
+      }
+
+      if (data.debug) {
+        console.debug("[InternBot]", data.debug);
       }
 
       setMessages((prev) => [
@@ -70,6 +94,7 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
           role: "assistant",
           text: data.answer ?? "No answer returned.",
           mode: data.mode,
+          intent: data.intent,
         },
       ]);
     } catch (err) {
@@ -172,10 +197,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           : "border border-border bg-white text-slate-700"
       }`}
     >
-      {!isUser && message.mode === "ml-model" ? (
+      {!isUser && message.intent ? (
         <p className="mb-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--dsce-gold)]">
-          <Sparkles className="h-3 w-3" />
-          ML outcome engine
+          {message.intent === "invalid_query" ? (
+            "unrecognized"
+          ) : (
+            <>
+              <Sparkles className="h-3 w-3" />
+              {message.intent.replace(/_/g, " ")}
+            </>
+          )}
         </p>
       ) : null}
       {message.text}

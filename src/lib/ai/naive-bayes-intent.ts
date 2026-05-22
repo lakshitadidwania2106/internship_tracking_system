@@ -1,11 +1,20 @@
 import { tokenize } from "@/lib/ai/text-utils";
 
 export type ChatIntent =
+  | "invalid_query"
+  | "greeting"
+  | "outcomes_mapping"
   | "outcomes_all"
   | "outcomes_co"
   | "outcomes_po"
   | "outcomes_pso"
+  | "outcomes_po_why"
   | "outcomes_justification"
+  | "compare_students"
+  | "sdg_alignment"
+  | "internship_analytics"
+  | "report_summary"
+  | "technologies_co"
   | "internship_company"
   | "internship_stipend"
   | "internship_role"
@@ -51,6 +60,18 @@ const TRAINING_DATA: TrainingExample[] = [
   { text: "student profile summary overview", intent: "student_summary" },
   { text: "tell me about this student intern", intent: "student_summary" },
   { text: "internship details for student", intent: "student_summary" },
+  { text: "why is po5 strongly mapped", intent: "outcomes_po_why" },
+  { text: "explain po5 mapping for student", intent: "outcomes_po_why" },
+  { text: "compare two students internship", intent: "compare_students" },
+  { text: "compare student outcomes", intent: "compare_students" },
+  { text: "sdg sustainability alignment", intent: "sdg_alignment" },
+  { text: "show sustainability sdg", intent: "sdg_alignment" },
+  { text: "internship analytics statistics", intent: "internship_analytics" },
+  { text: "show analytics for intern", intent: "internship_analytics" },
+  { text: "summarize internship report", intent: "report_summary" },
+  { text: "report summary for student", intent: "report_summary" },
+  { text: "which technologies influenced co1", intent: "technologies_co" },
+  { text: "tech stack tools used internship", intent: "technologies_co" },
 ];
 
 const VOCAB = new Set<string>();
@@ -123,6 +144,24 @@ export function classifyIntent(question: string): { intent: ChatIntent; confiden
 export function refineIntent(question: string, mlIntent: ChatIntent): ChatIntent {
   const lower = question.toLowerCase();
 
+  if (/\bcompare\b|\bvs\b|\bversus\b/.test(lower)) {
+    return "compare_students";
+  }
+  if (/\bwhy\b.*\bpo\s*\d{1,2}\b|\bpo\s*\d{1,2}\b.*\bwhy\b|\bwhy\b.*\bpo\d/.test(lower)) {
+    return "outcomes_po_why";
+  }
+  if (/\bsdg\b|\bsustainab/.test(lower)) {
+    return "sdg_alignment";
+  }
+  if (/\banalytic|\bstatistic|\bmetric/.test(lower)) {
+    return "internship_analytics";
+  }
+  if (/\bsummar|\breport\b/.test(lower) && !/\bco\b/.test(lower)) {
+    return "report_summary";
+  }
+  if (/\btechnolog|\btools?\b|\bstack\b|\btensorflow\b|\bpytorch\b/.test(lower) && /\bco\s*[1-4]\b/.test(lower)) {
+    return "technologies_co";
+  }
   if (/\bco\s*[1-4]\b|\bcourse\s+outcome/.test(lower)) {
     return "outcomes_co";
   }
@@ -154,4 +193,15 @@ export function refineIntent(question: string, mlIntent: ChatIntent): ChatIntent
 export function extractCoId(question: string): string | null {
   const match = question.match(/\bco\s*([1-4])\b/i);
   return match ? `CO${match[1]}` : null;
+}
+
+export function extractPoId(question: string): string | null {
+  const spaced = question.match(/\bpo\s*(\d{1,2})\b/i);
+  if (spaced) return `PO${spaced[1]}`;
+  const compact = question.match(/\bpo(\d{1,2})\b/i);
+  if (compact) return `PO${compact[1]}`;
+  if (/\bwhy\b/i.test(question) && /\bpo\b/i.test(question) && /\bmap/i.test(question)) {
+    return "PO5";
+  }
+  return null;
 }

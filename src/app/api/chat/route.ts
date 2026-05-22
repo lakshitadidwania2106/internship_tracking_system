@@ -3,14 +3,25 @@ import { askInternshipAssistant } from "@/lib/ai/internship-ai";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as { question?: string; usn?: string };
+    const body = (await request.json()) as {
+      question?: string;
+      usn?: string;
+      history?: string[];
+    };
     const question = body.question?.trim();
 
     if (!question) {
       return NextResponse.json({ message: "Question is required." }, { status: 400 });
     }
 
-    const result = await askInternshipAssistant(question, { usn: body.usn?.trim() });
+    const history = Array.isArray(body.history)
+      ? body.history.filter((h): h is string => typeof h === "string").slice(-6)
+      : undefined;
+
+    const result = await askInternshipAssistant(question, {
+      usn: body.usn?.trim(),
+      history,
+    });
     return NextResponse.json(result);
   } catch {
     return NextResponse.json(

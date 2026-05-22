@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as xlsx from "xlsx";
+import { COURSE_DETAILS } from "@/lib/constants";
+import { discoverAllSheetPlans, type ExcelSheetPlan } from "@/lib/excel-discovery";
+import { normalizeUsn } from "@/lib/excel-discovery";
 import { prisma } from "@/lib/prisma";
 
 export type ImportMode = "internship" | "marks";
@@ -14,12 +17,33 @@ export type ImportExcelOptions = {
   semester: number;
   sheetName?: string;
   headerRowIndex?: number;
+  usnColumnIndex?: number;
+  nameColumnIndex?: number;
   mode?: ImportMode;
   courseCode?: string;
   courseName?: string;
   credits?: number;
   /** When set, rows update `StudentReviewMark` instead of internship/outcome rows. */
   reviewNumber?: 1 | 2 | 3;
+};
+
+export type ImportSheetResult = {
+  imported: number;
+  rowsRead: number;
+  skippedNoUsn: number;
+  sheetName: string;
+  uniqueUsnsTouched: number;
+};
+
+export type BulkImportResult = {
+  filesScanned: number;
+  sheetsProcessed: number;
+  rowsRead: number;
+  rowsImported: number;
+  skippedNoUsn: number;
+  uniqueUsnsTouched: number;
+  totalStudentsInDb: number;
+  sheetResults: Array<ImportSheetResult & { fileName: string }>;
 };
 
 function readCell(record: Record<string, unknown>, candidates: string[]): string | undefined {
@@ -33,14 +57,55 @@ function readCell(record: Record<string, unknown>, candidates: string[]): string
 }
 
 function detectHeaderRow(rawRows: (string | number)[][]): number {
-  for (let index = 0; index < Math.min(rawRows.length, 40); index += 1) {
+  for (let index = 0; index < Math.min(rawRows.length, 50); index += 1) {
     const row = (rawRows[index] ?? []).map((cell) => String(cell).trim().toUpperCase());
     const joined = row.join(" | ");
-    if (joined.includes("USN") && (joined.includes("NAME") || joined.includes("STUDENT NAME"))) {
+    if (joined.includes("USN") && (joined.includes("NAME") || joined.includes("STUDENT"))) {
       return index;
     }
   }
   return 0;
+}
+
+function findColumnIndex(header: (string | number)[], matchers: string[]): number {
+  for (let i = 0; i < header.length; i += 1) {
+    const key = String(header[i] ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, " ");
+    if (matchers.some((m) => key.includes(m))) return i;
+  }
+  return -1;
+}
+
+function readUsnFromRow(
+  row: Record<string, unknown>,
+  raw: (string | number)[],
+  usnColumnIndex: number,
+): string | null {
+  if (usnColumnIndex >= 0) {
+    const fromCol = normalizeUsn(String(raw[usnColumnIndex] ?? ""));
+    if (fromCol) return fromCol;
+  }
+  const fromNamed = normalizeUsn(readCell(row, ["USN", "Usn"]));
+  if (fromNamed) return fromNamed;
+  for (const value of Object.values(row)) {
+    const found = normalizeUsn(String(value ?? ""));
+    if (found) return found;
+  }
+  return null;
+}
+
+function readNameFromRow(
+  row: Record<string, unknown>,
+  raw: (string | number)[],
+  nameColumnIndex: number,
+): string {
+  if (nameColumnIndex >= 0) {
+    const name = String(raw[nameColumnIndex] ?? "").trim();
+    if (name) return name;
+  }
+  return readCell(row, ["NAME", "Student Name", "Name", "STUDENT NAME"]) ?? "Unknown Student";
 }
 
 export async function ensureBatchSemester(options: {
@@ -142,7 +207,12 @@ export async function runExcelImport(
   });
   const headerRowIndex = options.headerRowIndex ?? detectHeaderRow(rawRows);
   const header = rawRows[headerRowIndex] ?? [];
-  const rows = rawRows.slice(headerRowIndex + 1).map((raw) => {
+  const usnColumnIndex =
+    options.usnColumnIndex ?? findColumnIndex(header, ["USN"]);
+  const nameColumnIndex =
+    options.nameColumnIndex ?? findColumnIndex(header, ["NAME", "STUDENT NAME", "STUDENT"]);
+
+  const rowPairs = rawRows.slice(headerRowIndex + 1).map((raw) => {
     const record: Record<string, unknown> = {};
     for (let i = 0; i < header.length; i += 1) {
       const key = `${header[i] ?? ""}`.trim();
@@ -150,28 +220,34 @@ export async function runExcelImport(
         record[key] = raw[i];
       }
     }
-    return record;
+    return { record, raw };
   });
 
   let imported = 0;
+  let skippedNoUsn = 0;
+  const touchedUsns = new Set<string>();
   const mode = options.mode ?? "internship";
   const reviewNumber = options.reviewNumber;
 
-  for (const row of rows) {
-    const usn = readCell(row, ["USN", "Usn"]);
-    if (!usn) continue;
+  for (const { record: row, raw } of rowPairs) {
+    const usn = readUsnFromRow(row, raw, usnColumnIndex);
+    if (!usn) {
+      skippedNoUsn += 1;
+      continue;
+    }
 
-    const fullName = readCell(row, ["NAME", "Student Name", "Name"]) ?? "Unknown Student";
+    const fullName = readNameFromRow(row, raw, nameColumnIndex);
+    touchedUsns.add(usn);
 
     const student = await prisma.student.upsert({
-      where: { usn: usn.toUpperCase() },
+      where: { usn },
       update: {
         fullName,
         batchId: batch.id,
         semesterRecordId: semesterRecord.id,
       },
       create: {
-        usn: usn.toUpperCase(),
+        usn,
         fullName,
         batchId: batch.id,
         semesterRecordId: semesterRecord.id,
@@ -251,17 +327,23 @@ export async function runExcelImport(
       },
     });
 
+    const mappingUpdate: {
+      relevantPOs?: string | null;
+      relevantPSOs?: string | null;
+      sourceRowRawJson: string;
+    } = {
+      sourceRowRawJson: JSON.stringify(row),
+    };
+    if (relevantPOs) mappingUpdate.relevantPOs = relevantPOs;
+    if (relevantPSOs) mappingUpdate.relevantPSOs = relevantPSOs;
+
     await prisma.outcomeMapping.upsert({
       where: { studentId: student.id },
-      update: {
-        relevantPOs,
-        relevantPSOs,
-        sourceRowRawJson: JSON.stringify(row),
-      },
+      update: mappingUpdate,
       create: {
         studentId: student.id,
-        relevantPOs,
-        relevantPSOs,
+        relevantPOs: relevantPOs ?? null,
+        relevantPSOs: relevantPSOs ?? null,
         sourceRowRawJson: JSON.stringify(row),
       },
     });
@@ -275,10 +357,77 @@ export async function runExcelImport(
       batchYear: options.batchYear,
       semester: options.semester,
       status: "completed",
-      rowsRead: rows.length,
+      rowsRead: rowPairs.length,
       rowsImported: imported,
     },
   });
 
-  return { imported, rowsRead: rows.length, sheetName: selectedSheetName };
+  return {
+    imported,
+    rowsRead: rowPairs.length,
+    skippedNoUsn,
+    sheetName: selectedSheetName,
+    uniqueUsnsTouched: touchedUsns.size,
+  };
+}
+
+function courseForBatchSemester(batchYear: number, semester: number) {
+  return COURSE_DETAILS[`${batchYear}-${semester}`];
+}
+
+export async function importSheetPlan(plan: ExcelSheetPlan): Promise<ImportSheetResult> {
+  const course = courseForBatchSemester(plan.batchYear, plan.semester);
+  const result = await importExcelFile({
+    filePath: plan.filePath,
+    batchYear: plan.batchYear,
+    semester: plan.semester,
+    sheetName: plan.sheetName,
+    headerRowIndex: plan.headerRowIndex,
+    usnColumnIndex: plan.usnColumnIndex,
+    nameColumnIndex: plan.nameColumnIndex,
+    mode: plan.mode,
+    reviewNumber: plan.reviewNumber,
+    courseCode: course?.code,
+    courseName: course?.name,
+    credits: course?.credits,
+    sourceFileName: `${plan.fileName} :: ${plan.sheetName}`,
+  });
+  return { ...result, fileName: plan.fileName };
+}
+
+/** Import every Excel/CSV sheet under data/imports/excel that contains a USN column. */
+export async function importAllRepositoryExcel(
+  excelRoot = path.join(process.cwd(), "data", "imports", "excel"),
+): Promise<BulkImportResult> {
+  const plans = discoverAllSheetPlans(excelRoot);
+  const filesScanned = new Set(plans.map((p) => p.filePath)).size;
+
+  const sheetResults: BulkImportResult["sheetResults"] = [];
+  let rowsRead = 0;
+  let rowsImported = 0;
+  let skippedNoUsn = 0;
+  const allUsns = new Set<string>();
+
+  for (const plan of plans) {
+    const result = await importSheetPlan(plan);
+    sheetResults.push(result);
+    rowsRead += result.rowsRead;
+    rowsImported += result.imported;
+    skippedNoUsn += result.skippedNoUsn;
+  }
+
+  const totalStudentsInDb = await prisma.student.count();
+  const students = await prisma.student.findMany({ select: { usn: true } });
+  for (const s of students) allUsns.add(s.usn);
+
+  return {
+    filesScanned,
+    sheetsProcessed: plans.length,
+    rowsRead,
+    rowsImported,
+    skippedNoUsn,
+    uniqueUsnsTouched: allUsns.size,
+    totalStudentsInDb,
+    sheetResults,
+  };
 }

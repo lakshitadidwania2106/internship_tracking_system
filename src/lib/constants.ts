@@ -1,7 +1,11 @@
 export const BATCH_SEMESTER_MAP: Record<number, number[]> = {
   2020: [8],
+<<<<<<< HEAD
   2021: [6, 8],
   2022: [8],
+=======
+  2021: [4, 6, 8],
+>>>>>>> ff54da8 (fixed chatbot routing and imported student database)
 };
 
 export const COURSE_DETAILS: Record<string, { code: string; name: string; credits: number }> = {
@@ -22,7 +26,11 @@ export const COURSE_DETAILS: Record<string, { code: string; name: string; credit
   },
   "2021-8": {
     code: "21INT82",
+<<<<<<< HEAD
     name: "Internship (Sem 8)",
+=======
+    name: "Internship",
+>>>>>>> ff54da8 (fixed chatbot routing and imported student database)
     credits: 4,
   },
 };

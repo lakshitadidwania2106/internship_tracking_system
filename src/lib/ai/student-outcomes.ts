@@ -4,7 +4,13 @@ import {
   CO_PO_PSO_MATRIX,
   INTERNSHIP_COS,
 } from "@/lib/co-po-pso";
-import { formatOutcomeSet, parseOutcomeCodes } from "@/lib/ai/text-utils";
+import {
+  derivePOsFromNlp,
+  derivePSOsFromNlp,
+  formatOutcomeSet,
+  parseOutcomeCodes,
+  type NlpAnalysisResult,
+} from "@/lib/ai/text-utils";
 
 export type StudentOutcomeInput = {
   fullName: string;
@@ -14,7 +20,12 @@ export type StudentOutcomeInput = {
     relevantPOs: string | null;
     relevantPSOs: string | null;
     coMappingSummary: string | null;
+    justification?: string | null;
   } | null;
+  nlp?: NlpAnalysisResult;
+  evaluation?: Record<string, string | undefined>;
+  excelRowSnippet?: string;
+  sourceRowRawJson?: string | null;
 };
 
 export type CoAlignment = {
@@ -30,6 +41,7 @@ export type StudentOutcomeProfile = {
   studentPSOs: Set<string>;
   coAlignments: CoAlignment[];
   summary: string | null;
+  poSource?: "excel" | "nlp-inferred" | "none";
 };
 
 const ROLE_CO_BOOST: Record<string, string[]> = {
@@ -45,6 +57,26 @@ function roleBoost(coId: string, roleTitle: string): number {
   return keywords.some((word) => lower.includes(word)) ? 2 : 0;
 }
 
+function nlpCoBoost(coId: string, nlp?: NlpAnalysisResult): number {
+  if (!nlp) return 0;
+  const s = nlp.scores;
+  switch (coId) {
+    case "CO1":
+      return Math.min(4, Math.floor(s.aiml / 2) + Math.floor(s.cloud / 4));
+    case "CO2":
+      return Math.min(4, Math.floor(s.research / 2));
+    case "CO3":
+      return Math.min(4, Math.floor(s.teamwork / 2) + Math.floor(s.communication / 3));
+    case "CO4":
+      return Math.min(
+        4,
+        Math.floor(s.sustainability / 2) + Math.floor(s.ethics / 3) + Math.floor(s.cloud / 4),
+      );
+    default:
+      return 0;
+  }
+}
+
 function matrixStrength(value: string): number {
   if (value === "-") {
     return 0;
@@ -54,15 +86,29 @@ function matrixStrength(value: string): number {
 }
 
 export function buildStudentOutcomeProfile(student: StudentOutcomeInput): StudentOutcomeProfile {
-  const studentPOs = parseOutcomeCodes(student.mapping?.relevantPOs, "PO");
-  const studentPSOs = parseOutcomeCodes(student.mapping?.relevantPSOs, "PSO");
+  let studentPOs = parseOutcomeCodes(student.mapping?.relevantPOs, "PO");
+  let studentPSOs = parseOutcomeCodes(student.mapping?.relevantPSOs, "PSO");
+
+  if (student.nlp && studentPOs.size === 0) {
+    studentPOs = derivePOsFromNlp(student.nlp.scores);
+  }
+  if (student.nlp && studentPSOs.size === 0) {
+    studentPSOs = derivePSOsFromNlp(student.nlp.scores);
+  }
+
   const roleTitle = student.internship?.roleTitle ?? "";
+  const poSource =
+    student.mapping?.relevantPOs?.trim() ?
+      "excel"
+    : student.nlp && studentPOs.size > 0 ?
+      "nlp-inferred"
+    : "none";
 
   const coAlignments: CoAlignment[] = INTERNSHIP_COS.map((co) => {
     const row = CO_PO_PSO_MATRIX[co.id];
     const alignedPOs: string[] = [];
     const alignedPSOs: string[] = [];
-    let score = roleBoost(co.id, roleTitle);
+    let score = roleBoost(co.id, roleTitle) + nlpCoBoost(co.id, student.nlp);
 
     CO_PO_PSO_COLUMNS.forEach((column, index) => {
       const strength = row[index];
@@ -102,19 +148,42 @@ export function buildStudentOutcomeProfile(student: StudentOutcomeInput): Studen
     studentPSOs,
     coAlignments,
     summary: student.mapping?.coMappingSummary ?? null,
+    poSource,
   };
 }
 
-export function formatFullOutcomeAnswer(student: StudentOutcomeInput, profile: StudentOutcomeProfile): string {
+export function getTopTechnologies(nlp: NlpAnalysisResult, limit = 8): string[] {
+  const tech = [
+    ...nlp.detectedKeywords.aiml,
+    ...nlp.detectedKeywords.cloud,
+    ...nlp.detectedKeywords.research,
+  ];
+  return [...new Set(tech)].slice(0, limit);
+}
+
+export function formatFullOutcomeAnswer(
+  student: StudentOutcomeInput,
+  profile: StudentOutcomeProfile,
+  extras?: { nlpConfidence?: number; technologies?: string[] },
+): string {
   const lines: string[] = [
     `${student.fullName} (${student.usn}) — Internship CO / PO / PSO`,
     `Role: ${student.internship?.roleTitle ?? "—"} @ ${student.internship?.companyName ?? "—"}`,
+    profile.poSource === "nlp-inferred"
+      ? "PO/PSO inferred from role + internship narrative (no Excel mapping on file)."
+      : "",
     "",
-    `Recorded POs: ${formatOutcomeSet(profile.studentPOs)}`,
-    `Recorded PSOs: ${formatOutcomeSet(profile.studentPSOs)}`,
+    `POs used: ${formatOutcomeSet(profile.studentPOs)}`,
+    `PSOs used: ${formatOutcomeSet(profile.studentPSOs)}`,
     profile.summary ? `Faculty summary: ${profile.summary}` : "",
+    extras?.technologies?.length
+      ? `Technologies / themes detected: ${extras.technologies.join(", ")}`
+      : "",
+    extras?.nlpConfidence != null
+      ? `Analysis confidence: ${Math.round(extras.nlpConfidence * 100)}%`
+      : "",
     "",
-    "Per-student CO alignment (from your PO/PSO list × course CO–PO–PSO matrix):",
+    "Per-student CO ranking (matrix × your PO/PSO + NLP/role signals):",
   ].filter(Boolean);
 
   for (const co of profile.coAlignments) {
@@ -129,6 +198,29 @@ export function formatFullOutcomeAnswer(student: StudentOutcomeInput, profile: S
     );
   }
 
+  return lines.join("\n");
+}
+
+/** Short mapping view — distinct from full CO dump */
+export function formatCompactMapping(
+  student: StudentOutcomeInput,
+  profile: StudentOutcomeProfile,
+): string {
+  const top = profile.coAlignments.filter((c) => c.score > 0).slice(0, 4);
+  const lines = [
+    `Mapping snapshot — ${student.fullName} (${student.usn})`,
+    `${student.internship?.roleTitle ?? "—"} @ ${student.internship?.companyName ?? "—"}`,
+    `POs: ${formatOutcomeSet(profile.studentPOs)} | PSOs: ${formatOutcomeSet(profile.studentPSOs)}`,
+    profile.poSource === "nlp-inferred" ? "(PO/PSO inferred from role + internship text)" : "",
+    "",
+    "Top CO alignments:",
+    ...top.map(
+      (co) =>
+        `• ${co.coId} (score ${co.score}): ${co.alignedPOs.slice(0, 4).join(", ") || "no PO"} | ${co.alignedPSOs.slice(0, 2).join(", ") || "no PSO"}`,
+    ),
+    "",
+    "Ask: “Explain CO2”, “Why is PO5 mapped?”, or “Summarize internship report” for detail.",
+  ].filter(Boolean);
   return lines.join("\n");
 }
 

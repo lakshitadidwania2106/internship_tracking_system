@@ -65,17 +65,20 @@ npm run dev:clean
 
 ## Importing Your Excel Files
 
-Place your files in:
+Place Excel files under:
 
-- `data/imports/excel/2020_sem8.xlsx`
-- `data/imports/excel/2021_sem4.xlsx`
-- `data/imports/excel/2021_sem6.xlsx`
+- `data/imports/excel/2020/` (2020 batch sheets)
+- `data/imports/excel/2021/` (2021 batch sheets)
 
-Then run:
+The import command scans all `.xlsx` / `.xls` / `.csv` files recursively, detects sheets with a USN column, normalizes USNs, and upserts students (safe duplicates via `usn` unique key).
 
 ```bash
+npm run db:deploy
+npm rebuild better-sqlite3
 npm run import:excel
 ```
+
+After import, the script prints **total students in DB** (expect 100+ when all batch sheets are present). Open Prisma Studio with `npx prisma studio` to verify.
 
 ## Upload From Website (Scalable for new years)
 

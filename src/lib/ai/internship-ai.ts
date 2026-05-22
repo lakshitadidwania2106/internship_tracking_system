@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { answerWithMlModel, isOutcomeQuestion } from "@/lib/ai/co-po-pso-chatbot";
 import { classifyIntent, refineIntent } from "@/lib/ai/naive-bayes-intent";
 import { formatGradeDisplay } from "@/lib/format-grade";
@@ -27,6 +28,9 @@ type AssistantStudent = {
   reviewMarks: { reviewNumber: number }[];
   documents: { fileLabel: string; storageKey: string | null }[];
 };
+=======
+import { answerFromRetrieval } from "@/lib/ai/response-engine";
+>>>>>>> ff54da8 (fixed chatbot routing and imported student database)
 
 export type InternshipPromptResult = {
   mode: "ml-model" | "database-rule" | "ollama-fallback";
@@ -34,8 +38,10 @@ export type InternshipPromptResult = {
   intent?: string;
   confidence?: number;
   studentUsn?: string;
+  debug?: Record<string, unknown>;
 };
 
+<<<<<<< HEAD
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 const USN_PATTERN = /\b\d[A-Z]{2}\d{2}[A-Z]{2}\d{3}\b/i;
@@ -278,19 +284,21 @@ function isOutcomeRelatedQuestion(question: string): boolean {
   return isOutcomeQuestion(refineIntent(question, intent));
 }
 
+=======
+>>>>>>> ff54da8 (fixed chatbot routing and imported student database)
 export async function askInternshipAssistant(
   question: string,
-  options?: { usn?: string },
+  options?: { usn?: string; history?: string[] },
 ): Promise<InternshipPromptResult> {
   const normalized = question.trim();
   if (!normalized) {
     return {
       mode: "database-rule",
-      answer:
-        "Ask InternBot about a student’s CO, PO, or PSO. Example: Show CO PO PSO mapping for 1DS21AI001",
+      answer: "Please enter a question about a student's internship outcomes.",
     };
   }
 
+<<<<<<< HEAD
   const student = (await findStudentFromQuestion(normalized, options?.usn)) as AssistantStudent | null;
 
   if (student) {
@@ -360,10 +368,15 @@ export async function askInternshipAssistant(
         "I could not match a student. Include a USN (e.g. 1DS21AI001) or full name, or open a student on the dashboard first.",
     };
   }
+=======
+  const result = await answerFromRetrieval(normalized, {
+    usn: options?.usn,
+    history: options?.history,
+  });
+>>>>>>> ff54da8 (fixed chatbot routing and imported student database)
 
   return {
-    mode: "database-rule",
-    answer:
-      "I could not match a student. Include a USN (e.g. 1DS21AI001) or full name, or open a student on the dashboard first.",
+    ...result,
+    debug: result.debug as Record<string, unknown> | undefined,
   };
 }
