@@ -1,3 +1,4 @@
+import { formatGradeDisplay } from "@/lib/format-grade";
 import { prisma } from "@/lib/prisma";
 
 type AssistantStudent = {
@@ -140,7 +141,7 @@ function formatStudentContext(student: AssistantStudent): string {
     `Role: ${student.internship?.roleTitle ?? "N/A"}`,
     `Stipend: ${student.internship?.stipend ?? "N/A"}`,
     `Duration: ${student.internship?.durationText ?? `${student.internship?.startDateRaw ?? "-"} to ${student.internship?.endDateRaw ?? "-"}`}`,
-    `Grade/Marks: ${student.internship?.grade ?? totalMarks ?? "N/A"}`,
+    `Grade/Marks: ${formatGradeDisplay(student.internship?.grade) || totalMarks || "Absent"}`,
     `Status: ${student.internship?.status ?? "N/A"}`,
     `POs: ${student.mapping?.relevantPOs ?? "-"}`,
     `PSOs: ${student.mapping?.relevantPSOs ?? "-"}`,
@@ -226,7 +227,7 @@ function answerFromIntent(student: AssistantStudent, intent: QuestionIntent): st
         `${student.internship?.startDateRaw ?? "?"} to ${student.internship?.endDateRaw ?? "?"}`
       }.`;
     case "marks":
-      return `${student.fullName}'s grade/marks: ${student.internship?.grade ?? "not assigned yet"}.`;
+      return `${student.fullName}'s grade/marks: ${formatGradeDisplay(student.internship?.grade)}.`;
     case "report":
       return student.documents.some((d) => d.storageKey)
         ? `Yes — a report PDF is on file for ${student.usn}. Use Download on the Overview tab or /api/documents/by-usn/${student.usn}.`

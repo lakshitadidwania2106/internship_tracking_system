@@ -229,10 +229,6 @@ export function DataManagementPanel() {
             Cloudflare R2 (or local fallback when env vars are absent). Only storage keys are persisted.
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-900">
-          <Cloud className="h-3.5 w-3.5" />
-          <span>R2-ready • SQLite + Prisma</span>
-        </div>
       </div>
 
       <section className="grid gap-4 lg:grid-cols-2">

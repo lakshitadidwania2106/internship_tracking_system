@@ -1,12 +1,11 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { NextResponse } from "next/server";
 
-const LOGO_PATH =
-  "/Users/lucky21/.cursor/projects/Users-lucky21-Desktop-internship-tracking-system/assets/Screenshot_2026-04-28_at_10.20.36_AM-79867c41-f1ba-4f20-9ebf-2f7baccc4fa4.png";
-
 export async function GET() {
+  const logoPath = path.join(process.cwd(), "public", "dsce-logo.png");
   try {
-    const file = await fs.readFile(LOGO_PATH);
+    const file = await fs.readFile(logoPath);
     return new NextResponse(file, {
       headers: {
         "Content-Type": "image/png",

@@ -104,9 +104,6 @@ export function ChatAssistant() {
             <p className="inline-flex items-center gap-2 text-sm font-semibold">
               <Bot className="h-4 w-4 text-primary" />
               InternBot
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-normal text-emerald-800">
-                NLP + DB
-              </span>
             </p>
             <button type="button" onClick={() => setOpen(false)} className="rounded p-1 text-slate-500">
               <X className="h-4 w-4" />

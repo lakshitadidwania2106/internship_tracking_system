@@ -12,7 +12,9 @@ import { ChatAssistant } from "@/components/chat-assistant";
 import { DataManagementPanel } from "@/components/data-management-panel";
 import { DataUploadPanel } from "@/components/data-upload-panel";
 import { StatusPanel } from "@/components/status-panel";
+import { PortalUserMenu } from "@/components/portal-user-menu";
 import { StudentInternshipSummary } from "@/components/student-internship-summary";
+import { formatGradeDisplay } from "@/lib/format-grade";
 import { CalendarDays, Download, User } from "lucide-react";
 import Image from "next/image";
 
@@ -70,18 +72,19 @@ export default async function Home({ searchParams }: PageProps) {
         <div className="mx-auto flex w-full max-w-[1280px] items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <Image
-              src="/api/assets/dsce-logo"
+              src="/dsce-logo.png"
               alt="Dayananda Sagar College of Engineering Logo"
-              width={220}
-              height={64}
-              className="h-12 w-auto rounded bg-white p-1 sm:h-14"
+              width={56}
+              height={56}
+              className="h-12 w-12 rounded-full bg-white object-contain p-0.5 sm:h-14 sm:w-14"
               unoptimized
             />
             <h1 className="text-base font-semibold text-[var(--dsce-navy)] sm:text-2xl">
               DSCE | Department of AIML - Internship Portal
             </h1>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
+            <PortalUserMenu />
             <nav className="hidden items-center gap-2 text-xs text-slate-700 md:flex">
               {DASHBOARD_LINKS.map((item) => (
                 <a
@@ -108,10 +111,9 @@ export default async function Home({ searchParams }: PageProps) {
                 Select a batch and semester, then search by USN to view student internship details.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <MetricCard label="Total Students" value={String(stats.totalStudents)} />
               <MetricCard label="Internships" value={String(stats.internshipCount)} />
-              <MetricCard label="Conversion" value={`${stats.conversionRate}%`} />
               <MetricCard label="Batch" value={String(selectedBatch)} />
             </div>
           </header>
@@ -140,14 +142,9 @@ export default async function Home({ searchParams }: PageProps) {
                 </div>
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-4">
-                    <div>
-                      <h3 className="text-xl font-semibold">{selectedStudent.fullName}</h3>
-                      <p className="text-sm text-muted">USN: {selectedStudent.usn}</p>
-                    </div>
-                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                      {selectedStudent.internship?.status ?? "Status N/A"}
-                    </span>
+                  <div className="border-b border-border pb-4">
+                    <h3 className="text-xl font-semibold">{selectedStudent.fullName}</h3>
+                    <p className="text-sm text-muted">USN: {selectedStudent.usn}</p>
                   </div>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <InfoItem label="Batch" value={String(selectedStudent.batch.year)} />
@@ -168,7 +165,10 @@ export default async function Home({ searchParams }: PageProps) {
                         `${selectedStudent.internship?.startDateRaw ?? "-"} to ${selectedStudent.internship?.endDateRaw ?? "-"}`
                       }
                     />
-                    <InfoItem label="Grade" value={selectedStudent.internship?.grade ?? "Not assigned"} />
+                    <InfoItem
+                      label="Grade"
+                      value={formatGradeDisplay(selectedStudent.internship?.grade)}
+                    />
                   </div>
                   <StudentInternshipSummary usn={selectedStudent.usn} />
                 </>
@@ -198,10 +198,10 @@ export default async function Home({ searchParams }: PageProps) {
                   <MiniInfo label="Presentation (10)" value={evaluation.presentationMarks ?? "-"} />
                 </div>
                 {selectedStudent?.reviewMarks?.length ? (
-                  <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
+                  <p className="mt-3 text-xs text-muted">
                     Review uploads on record:{" "}
                     {selectedStudent.reviewMarks.map((m) => `R${m.reviewNumber}`).join(", ")}
-                  </div>
+                  </p>
                 ) : null}
               </div>
               <div className="rounded-xl border border-border bg-white p-4">
