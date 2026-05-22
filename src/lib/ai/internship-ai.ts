@@ -1,4 +1,5 @@
-import { formatGradeDisplay } from "@/lib/format-grade";
+import { answerWithMlModel, isOutcomeQuestion } from "@/lib/ai/co-po-pso-chatbot";
+import { classifyIntent, refineIntent } from "@/lib/ai/naive-bayes-intent";
 import { prisma } from "@/lib/prisma";
 
 type AssistantStudent = {
@@ -27,9 +28,11 @@ type AssistantStudent = {
 };
 
 export type InternshipPromptResult = {
-  mode: "database-rule" | "ollama" | "aggregate";
+  mode: "ml-model" | "database-rule" | "ollama-fallback";
   answer: string;
-  matchedUsn?: string;
+  intent?: string;
+  confidence?: number;
+  studentUsn?: string;
 };
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
@@ -150,24 +153,67 @@ function formatStudentContext(student: AssistantStudent): string {
   ].join("\n");
 }
 
-async function findStudentFromQuestion(question: string) {
+function toOutcomeInput(student: AssistantStudent) {
+  return {
+    usn: student.usn,
+    fullName: student.fullName,
+    internship: student.internship
+      ? {
+          companyName: student.internship.companyName,
+          roleTitle: student.internship.roleTitle,
+        }
+      : null,
+    mapping: student.mapping,
+  };
+}
+
+async function findStudentFromQuestion(question: string, hintUsn?: string) {
+  const normalizedHint = hintUsn?.trim().toUpperCase();
+  if (normalizedHint) {
+    const hinted = await prisma.student.findUnique({
+      where: { usn: normalizedHint },
+      include: { internship: true, batch: true, semesterRecord: true, mapping: true },
+    });
+    if (hinted) {
+      return hinted;
+    }
+  }
+
   const usnMatch = question.match(USN_PATTERN)?.[0]?.toUpperCase();
   if (usnMatch) {
     return prisma.student.findUnique({
       where: { usn: usnMatch },
-      include: {
-        internship: true,
-        batch: true,
-        semesterRecord: true,
-        mapping: true,
-        reviewMarks: true,
-        documents: true,
-      },
+      include: { internship: true, batch: true, semesterRecord: true, mapping: true },
     });
   }
 
-  const tokens = tokenizeForNameSearch(question);
-  if (tokens.length === 0) return null;
+  const quotedName = question.match(/"([^"]+)"/)?.[1]?.trim();
+  const tokens = (quotedName ?? question)
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .filter(
+      (token) =>
+        ![
+          "what",
+          "which",
+          "did",
+          "internship",
+          "company",
+          "student",
+          "name",
+          "show",
+          "list",
+          "mapping",
+          "outcome",
+          "outcomes",
+        ].includes(token.toLowerCase()),
+    );
+
+  if (tokens.length === 0) {
+    return null;
+  }
 
   const candidates = await prisma.student.findMany({
     include: {
@@ -249,12 +295,10 @@ async function askOllama(question: string, context: string, history?: ChatTurn[]
       : "";
 
   const prompt = [
-    "You are InternBot for the DSCE AIML Internship Portal (faculty audience).",
-    "Answer in 2-5 clear sentences. Use ONLY facts from Context and conversation.",
-    "If the answer is not in context, say what is missing and suggest searching by USN.",
-    "Never invent companies, marks, or dates.",
-    historyBlock,
-    `Context:\n${context}`,
+    "You are InternBot for DSCE AIML internship tracking portal.",
+    "Answer briefly in 2-4 lines for faculty users.",
+    "If context is provided, answer strictly from context.",
+    context ? `Context:\n${context}` : "",
     `Question: ${question}`,
   ]
     .filter(Boolean)
@@ -276,48 +320,70 @@ async function askOllama(question: string, context: string, history?: ChatTurn[]
   return data.response?.trim();
 }
 
+function isOutcomeRelatedQuestion(question: string): boolean {
+  const lower = question.toLowerCase();
+  if (/\b(co|po|pso)\b/.test(lower) || lower.includes("outcome") || lower.includes("mapping")) {
+    return true;
+  }
+  const { intent } = classifyIntent(question);
+  return isOutcomeQuestion(refineIntent(question, intent));
+}
+
 export async function askInternshipAssistant(
   question: string,
-  history?: ChatTurn[],
+  options?: { usn?: string },
 ): Promise<InternshipPromptResult> {
   const normalized = question.trim();
   if (!normalized) {
     return {
       mode: "database-rule",
-      answer: "Ask a question with a student USN or name — e.g. “What company did 1DS21AI001 intern at?”",
+      answer:
+        "Ask InternBot about a student’s CO, PO, or PSO. Example: Show CO PO PSO mapping for 1DS21AI001",
     };
   }
 
-  const aggregate = await answerAggregateQuestion(normalized);
-  if (aggregate) {
-    return { mode: "aggregate", answer: aggregate };
-  }
-
-  const intent = classifyIntent(normalized);
-  const student = (await findStudentFromQuestion(normalized)) as AssistantStudent | null;
+  const student = (await findStudentFromQuestion(normalized, options?.usn)) as AssistantStudent | null;
 
   if (student) {
-    const direct = answerFromIntent(student, intent);
-    if (direct && intent !== "general" && intent !== "summary") {
-      return { mode: "database-rule", answer: direct, matchedUsn: student.usn };
+    const lower = normalized.toLowerCase();
+
+    if (isOutcomeRelatedQuestion(normalized)) {
+      const ml = answerWithMlModel(normalized, toOutcomeInput(student));
+      return ml;
+    }
+
+    if (lower.includes("company")) {
+      return {
+        mode: "database-rule",
+        answer: `${student.fullName} (${student.usn}) interned at ${student.internship?.companyName ?? "company not available in records"}.`,
+        studentUsn: student.usn,
+      };
+    }
+    if (lower.includes("stipend")) {
+      return {
+        mode: "database-rule",
+        answer: `${student.fullName} (${student.usn}) stipend: ${student.internship?.stipend ?? "not available"}.`,
+        studentUsn: student.usn,
+      };
+    }
+    if (lower.includes("role") || lower.includes("domain")) {
+      return {
+        mode: "database-rule",
+        answer: `${student.fullName} (${student.usn}) role: ${student.internship?.roleTitle ?? "not available"}.`,
+        studentUsn: student.usn,
+      };
     }
 
     const context = formatStudentContext(student);
     try {
       const ollamaReply = await askOllama(normalized, context, history);
       if (ollamaReply) {
-        return { mode: "ollama", answer: ollamaReply, matchedUsn: student.usn };
+        return { mode: "ollama-fallback", answer: ollamaReply, studentUsn: student.usn };
       }
     } catch {
-      if (direct) return { mode: "database-rule", answer: direct, matchedUsn: student.usn };
-      return { mode: "database-rule", answer: context, matchedUsn: student.usn };
+      return { mode: "database-rule", answer: context, studentUsn: student.usn };
     }
-
-    return {
-      mode: "database-rule",
-      answer: direct ?? context,
-      matchedUsn: student.usn,
-    };
+    return { mode: "database-rule", answer: context, studentUsn: student.usn };
   }
 
   // Batch-level context for Ollama when no student matched
@@ -340,12 +406,16 @@ export async function askInternshipAssistant(
       return { mode: "ollama", answer: ollamaReply };
     }
   } catch {
-    // fall through
+    return {
+      mode: "database-rule",
+      answer:
+        "I could not match a student. Include a USN (e.g. 1DS21AI001) or full name, or open a student on the dashboard first.",
+    };
   }
 
   return {
     mode: "database-rule",
     answer:
-      "I could not match a student. Include a USN (e.g. 1DS21AI001) or put the full name in quotes. You can also ask “How many students are in the database?”",
+      "I could not match a student. Include a USN (e.g. 1DS21AI001) or full name, or open a student on the dashboard first.",
   };
 }

@@ -49,6 +49,20 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### If you see `The table main.Batch does not exist`
+
+The app must use `prisma/dev.db` (not an empty `dev.db` in the project root).
+
+1. Stop the dev server (Ctrl+C).
+2. Run:
+
+```bash
+npm run db:deploy
+npm run dev:clean
+```
+
+3. If `dev.db` in the project root still exists, delete it after stopping the server, then run `npm run dev` again.
+
 ## Importing Your Excel Files
 
 Place your files in:
@@ -90,16 +104,19 @@ A placeholder service boundary for future LLM features is available in:
 
 Current mode supports direct database answers and optional local Ollama fallback.
 
-## Teacher Chatbot (Ollama + DB)
+## InternBot (ML CO/PO/PSO + DB + optional Ollama)
 
-- Floating chatbot button appears on the dashboard.
-- It answers direct internship questions using database records first.
-- If needed, it falls back to local Ollama (`http://127.0.0.1:11434`) for concise summaries.
+- Floating **InternBot** button on the dashboard (mint/navy DSCE theme).
+- Uses a **multinomial Naive Bayes intent classifier** for CO / PO / PSO questions.
+- Builds **per-student** outcome answers by intersecting each student's recorded PO/PSO list with the course CO–PO–PSO matrix in `src/lib/co-po-pso.ts`.
+- Uses the currently selected student USN when you ask from the overview tab.
+- Falls back to local Ollama (`http://127.0.0.1:11434`) for other internship questions when available.
 
 Examples:
+- `Show CO PO PSO mapping for 1DS21AI001`
+- `What are the relevant POs for Adithya N Awati?`
+- `Explain CO1 justification for this intern` (with a student selected on the dashboard)
 - `What internship company did 1DS21AI001 do?`
-- `What is the stipend of Amit A?`
-- `Show mapping for 1DS20AI024`
 
 Optional environment variable:
 
