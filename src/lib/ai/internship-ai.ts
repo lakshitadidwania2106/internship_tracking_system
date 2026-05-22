@@ -1,5 +1,6 @@
 import { answerWithMlModel, isOutcomeQuestion } from "@/lib/ai/co-po-pso-chatbot";
 import { classifyIntent, refineIntent } from "@/lib/ai/naive-bayes-intent";
+import { formatGradeDisplay } from "@/lib/format-grade";
 import { prisma } from "@/lib/prisma";
 
 type AssistantStudent = {
@@ -71,32 +72,6 @@ const STOPWORDS = new Set([
   "this",
   "that",
 ]);
-
-type QuestionIntent =
-  | "company"
-  | "role"
-  | "stipend"
-  | "duration"
-  | "marks"
-  | "summary"
-  | "count"
-  | "list"
-  | "report"
-  | "general";
-
-function classifyIntent(question: string): QuestionIntent {
-  const q = question.toLowerCase();
-  if (/\b(how many|count|number of|total)\b/.test(q)) return "count";
-  if (/\b(list|which students|who interned)\b/.test(q)) return "list";
-  if (/\b(report|pdf|document)\b/.test(q)) return "report";
-  if (/\b(mark|grade|score|evaluation|presentation)\b/.test(q)) return "marks";
-  if (/\b(stipend|paid|salary)\b/.test(q)) return "stipend";
-  if (/\b(duration|period|when|start|end|months)\b/.test(q)) return "duration";
-  if (/\b(role|domain|title|position)\b/.test(q)) return "role";
-  if (/\b(company|organization|firm|where)\b/.test(q)) return "company";
-  if (/\b(summarize|summary|overview|describe|explain)\b/.test(q)) return "summary";
-  return "general";
-}
 
 function tokenizeForNameSearch(question: string): string[] {
   const quoted = question.match(/"([^"]+)"/)?.[1]?.trim();
@@ -259,32 +234,6 @@ async function answerAggregateQuestion(question: string): Promise<string | null>
   return `Database snapshot: ${students} students, ${internships} internships, ${withReports} report PDFs.`;
 }
 
-function answerFromIntent(student: AssistantStudent, intent: QuestionIntent): string | null {
-  switch (intent) {
-    case "company":
-      return `${student.fullName} (${student.usn}) interned at ${student.internship?.companyName ?? "a company not listed in records"}.`;
-    case "role":
-      return `${student.fullName} worked as ${student.internship?.roleTitle ?? "role not listed"}.`;
-    case "stipend":
-      return `Stipend for ${student.fullName}: ${student.internship?.stipend ?? "not recorded"}.`;
-    case "duration":
-      return `${student.fullName}'s internship duration: ${
-        student.internship?.durationText ??
-        `${student.internship?.startDateRaw ?? "?"} to ${student.internship?.endDateRaw ?? "?"}`
-      }.`;
-    case "marks":
-      return `${student.fullName}'s grade/marks: ${formatGradeDisplay(student.internship?.grade)}.`;
-    case "report":
-      return student.documents.some((d) => d.storageKey)
-        ? `Yes — a report PDF is on file for ${student.usn}. Use Download on the Overview tab or /api/documents/by-usn/${student.usn}.`
-        : `No stored PDF report found for ${student.usn} yet. Upload via Data Management.`;
-    case "summary":
-      return formatStudentContext(student);
-    default:
-      return null;
-  }
-}
-
 async function askOllama(question: string, context: string, history?: ChatTurn[]) {
   const historyBlock =
     history && history.length > 0
@@ -376,7 +325,7 @@ export async function askInternshipAssistant(
 
     const context = formatStudentContext(student);
     try {
-      const ollamaReply = await askOllama(normalized, context, history);
+      const ollamaReply = await askOllama(normalized, context);
       if (ollamaReply) {
         return { mode: "ollama-fallback", answer: ollamaReply, studentUsn: student.usn };
       }
@@ -400,10 +349,9 @@ export async function askInternshipAssistant(
     const ollamaReply = await askOllama(
       normalized,
       `Available batches:\n${batchContext}\nNo specific student was matched from this question.`,
-      history,
     );
     if (ollamaReply) {
-      return { mode: "ollama", answer: ollamaReply };
+      return { mode: "ollama-fallback", answer: ollamaReply };
     }
   } catch {
     return {

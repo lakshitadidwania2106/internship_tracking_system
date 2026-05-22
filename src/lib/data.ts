@@ -158,7 +158,6 @@ export async function searchStudents({
       ...whereQuery,
     },
     include: studentInclude,
-    take: 50,
     orderBy: {
       usn: "asc",
     },
@@ -189,16 +188,31 @@ export async function getBatchSemesterMapFromDb() {
   const batches = await prisma.batch.findMany({
     include: {
       semesters: {
-        select: { semester: true },
+        select: { id: true, semester: true },
         orderBy: { semester: "asc" },
       },
+      _count: { select: { students: true } },
     },
     orderBy: { year: "asc" },
   });
 
   const map: Record<number, number[]> = {};
   for (const batch of batches) {
-    map[batch.year] = batch.semesters.map((semester) => semester.semester);
+    if (batch._count.students === 0) continue;
+
+    const semestersWithStudents: number[] = [];
+    for (const sem of batch.semesters) {
+      const count = await prisma.student.count({
+        where: { batchId: batch.id, semesterRecordId: sem.id },
+      });
+      if (count > 0) {
+        semestersWithStudents.push(sem.semester);
+      }
+    }
+
+    if (semestersWithStudents.length > 0) {
+      map[batch.year] = semestersWithStudents;
+    }
   }
   return map;
 }

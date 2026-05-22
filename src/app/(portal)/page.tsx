@@ -2,7 +2,6 @@ import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS } from "@/lib/constants";
 import {
   getBatchSemesterMapFromDb,
   getDashboardStats,
-  getRecentImportJobs,
   getStudentsForBatchSemester,
   resolveDashboardFilters,
   searchStudents,
@@ -10,7 +9,7 @@ import {
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ChatAssistant } from "@/components/chat-assistant";
 import { DataManagementPanel } from "@/components/data-management-panel";
-import { DataUploadPanel } from "@/components/data-upload-panel";
+import { AccountSettingsPanel } from "@/components/account-settings-panel";
 import { StatusPanel } from "@/components/status-panel";
 import { PortalUserMenu } from "@/components/portal-user-menu";
 import { StudentInternshipSummary } from "@/components/student-internship-summary";
@@ -49,7 +48,7 @@ export default async function Home({ searchParams }: PageProps) {
     .sort((a, b) => a - b);
   const availableSemesters = effectiveBatchMap[selectedBatch] ?? [];
 
-  const [students, allStudents, stats, importJobs] = await Promise.all([
+  const [students, allStudents, stats] = await Promise.all([
     searchStudents({
       batchYear: selectedBatch,
       semester: selectedSemester,
@@ -57,13 +56,10 @@ export default async function Home({ searchParams }: PageProps) {
     }),
     getStudentsForBatchSemester(selectedBatch, selectedSemester),
     getDashboardStats(selectedBatch, selectedSemester),
-    getRecentImportJobs(),
   ]);
 
   const selectedStudent =
     students.find((student) => student.usn.toUpperCase() === usnQuery.toUpperCase()) ?? students[0];
-  const evaluation = getEvaluationSnapshot(selectedStudent?.internship?.sourceRowRawJson);
-  const averageMarks = getAverageMarks(allStudents);
   const topCompanies = getTopCompanies(allStudents);
 
   return (
@@ -190,21 +186,6 @@ export default async function Home({ searchParams }: PageProps) {
                 <p className="mt-2 text-xs text-muted">Report filename should include the student USN.</p>
               </div>
               <div className="rounded-xl border border-border bg-white p-4">
-                <h4 className="mb-3 font-semibold">Internship Evaluation</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <MiniInfo label="Total Marks" value={evaluation.totalMarks ?? "-"} />
-                  <MiniInfo label="Evaluator" value={evaluation.evaluatorName ?? "-"} />
-                  <MiniInfo label="Report (10)" value={evaluation.reportMarks ?? "-"} />
-                  <MiniInfo label="Presentation (10)" value={evaluation.presentationMarks ?? "-"} />
-                </div>
-                {selectedStudent?.reviewMarks?.length ? (
-                  <p className="mt-3 text-xs text-muted">
-                    Review uploads on record:{" "}
-                    {selectedStudent.reviewMarks.map((m) => `R${m.reviewNumber}`).join(", ")}
-                  </p>
-                ) : null}
-              </div>
-              <div className="rounded-xl border border-border bg-white p-4">
                 <h4 className="mb-3 font-semibold">Students In Selection</h4>
                 <ul className="space-y-2 text-sm">
                   {students.slice(0, 8).map((student) => (
@@ -305,17 +286,6 @@ export default async function Home({ searchParams }: PageProps) {
             </section>
           ) : null}
 
-          {activeTab === "analytics" ? (
-            <section className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <MetricCard label="Avg Total Marks" value={averageMarks} />
-                <MetricCard label="Students with Stipend" value={String(allStudents.filter((s) => (s.internship?.stipend ?? "").trim() && s.internship?.stipend !== "-").length)} />
-                <MetricCard label="Unique Companies" value={String(new Set(allStudents.map((s) => s.internship?.companyName).filter(Boolean)).size)} />
-                <MetricCard label="Selected Batch/Sem" value={`${selectedBatch} / ${selectedSemester}`} />
-              </div>
-            </section>
-          ) : null}
-
           {activeTab === "status" ? (
             <section className="rounded-2xl border border-border bg-[#f8fafc] p-5 sm:p-8">
               <StatusPanel
@@ -327,45 +297,8 @@ export default async function Home({ searchParams }: PageProps) {
           ) : null}
 
           {activeTab === "settings" ? (
-            <section className="space-y-4">
-              <DataUploadPanel />
-              <div className="rounded-xl border border-border bg-white p-4">
-                <h3 className="mb-3 text-lg font-semibold">Portal Settings & Data Sources</h3>
-                <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-                  <li>Excel imports path: data/imports/excel</li>
-                  <li>Reports path: data/imports/reports</li>
-                  <li>Object storage: configure Cloudflare R2 env vars for production uploads</li>
-                  <li>InternBot: ML intent classifier + per-student CO/PO/PSO engine (Ollama optional)</li>
-                  <li>Current filter default: Batch {selectedBatch}, Semester {selectedSemester}</li>
-                </ul>
-              </div>
-              <div className="rounded-xl border border-border bg-white p-4">
-                <h4 className="mb-3 font-semibold">Recent Import Jobs</h4>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-slate-100">
-                      <tr>
-                        <th className="px-3 py-2 text-left">File</th>
-                        <th className="px-3 py-2 text-left">Batch/Sem</th>
-                        <th className="px-3 py-2 text-left">Rows</th>
-                        <th className="px-3 py-2 text-left">Imported</th>
-                        <th className="px-3 py-2 text-left">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {importJobs.map((job) => (
-                        <tr key={job.id} className="border-b border-border">
-                          <td className="px-3 py-2">{job.sourceFileName}</td>
-                          <td className="px-3 py-2">{job.batchYear} / {job.semester}</td>
-                          <td className="px-3 py-2">{job.rowsRead}</td>
-                          <td className="px-3 py-2">{job.rowsImported}</td>
-                          <td className="px-3 py-2">{job.status}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            <section className="max-w-3xl">
+              <AccountSettingsPanel />
             </section>
           ) : null}
 
@@ -423,28 +356,6 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <p className="text-lg font-semibold">{value}</p>
     </div>
   );
-}
-
-function MiniInfo({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-slate-50 p-2">
-      <p className="text-[11px] text-muted">{label}</p>
-      <p className="text-sm font-semibold text-slate-800">{value}</p>
-    </div>
-  );
-}
-
-function getAverageMarks(
-  students: Array<{ internship: { sourceRowRawJson: string | null } | null }>,
-) {
-  const marks = students
-    .map((student) => getEvaluationSnapshot(student.internship?.sourceRowRawJson).totalMarks)
-    .map((mark) => Number(mark))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  if (marks.length === 0) {
-    return "-";
-  }
-  return (marks.reduce((sum, value) => sum + value, 0) / marks.length).toFixed(1);
 }
 
 function getTopCompanies(

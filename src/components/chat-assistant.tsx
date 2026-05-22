@@ -55,15 +55,14 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
         body: JSON.stringify({ question: text, usn: selectedUsn }),
       });
 
-      const data = (await response.json()) as { answer?: string; mode?: string; message?: string };
-      if (!response.ok) {
-        throw new Error(data.message ?? "Request failed");
-      }
-
       const data = (await response.json()) as {
         answer?: string;
         mode?: string;
+        message?: string;
       };
+      if (!response.ok) {
+        throw new Error(data.message ?? "Request failed");
+      }
 
       setMessages((prev) => [
         ...prev,

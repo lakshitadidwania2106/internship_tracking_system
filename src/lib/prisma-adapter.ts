@@ -1,15 +1,6 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { getDatabaseFilePath } from "@/lib/database-path";
 
-function resolveSqlitePath() {
-  const url = process.env.DATABASE_URL ?? "file:./dev.db";
-  const raw = url.replace(/^file:/i, "").trim();
-  if (path.isAbsolute(raw)) {
-    return raw;
-  }
-  return path.join(process.cwd(), raw.replace(/^\.\//, ""));
-}
-
 export function createSqliteAdapter() {
   const dbPath = getDatabaseFilePath();
   // Adapter strips the "file:" prefix and opens that path with better-sqlite3.

@@ -1,9 +1,14 @@
 import path from "node:path";
 
 /**
- * SQLite file used by the app and by `DATABASE_URL=file:./prisma/dev.db`.
- * Kept explicit so we never open an empty `./dev.db` at the project root.
+ * Resolves the SQLite file from DATABASE_URL (e.g. file:./dev.db).
+ * Defaults to project-root dev.db where imported Excel data lives.
  */
 export function getDatabaseFilePath(): string {
-  return path.resolve(process.cwd(), "prisma", "dev.db");
+  const url = process.env.DATABASE_URL ?? "file:./dev.db";
+  const raw = url.replace(/^file:/i, "").trim();
+  if (path.isAbsolute(raw)) {
+    return raw;
+  }
+  return path.resolve(process.cwd(), raw);
 }

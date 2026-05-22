@@ -1,6 +1,7 @@
 export const BATCH_SEMESTER_MAP: Record<number, number[]> = {
   2020: [8],
-  2021: [4, 6],
+  2021: [6, 8],
+  2022: [8],
 };
 
 export const COURSE_DETAILS: Record<string, { code: string; name: string; credits: number }> = {
@@ -19,13 +20,17 @@ export const COURSE_DETAILS: Record<string, { code: string; name: string; credit
     name: "Internship",
     credits: 4,
   },
+  "2021-8": {
+    code: "21INT82",
+    name: "Internship (Sem 8)",
+    credits: 4,
+  },
 };
 
 export const DASHBOARD_LINKS = [
   "Overview",
   "Students",
   "Internships",
-  "Analytics",
   "Status",
   "Data Management",
   "Settings",
