@@ -1,6 +1,6 @@
 "use client";
 
-import type { MarkUploadKind } from "@/lib/constants";
+import { BATCH_SEMESTER_MAP, getMarksImportPreset, type MarkUploadKind } from "@/lib/constants";
 import {
   CalendarClock,
   CheckCircle2,
@@ -74,6 +74,14 @@ export function DataManagementPanel() {
     setUploadBatchYear(y);
     setSemBatchYear(y);
   }, [batches, uploadBatchYear]);
+
+  useEffect(() => {
+    if (uploadBatchYear === "") return;
+    const sems = BATCH_SEMESTER_MAP[uploadBatchYear];
+    if (sems?.length && !sems.includes(Number(uploadSemester))) {
+      setUploadSemester(String(sems[0]));
+    }
+  }, [uploadBatchYear, uploadSemester]);
 
   const selectedUploadBatch = useMemo(() => {
     if (uploadBatchYear === "") return undefined;
@@ -165,6 +173,14 @@ export function DataManagementPanel() {
       fd.set("batchYear", String(uploadBatchYear));
       fd.set("semester", uploadSemester);
       fd.set("markKind", markKind);
+      const preset = getMarksImportPreset(uploadBatchYear, Number(uploadSemester), markKind);
+      if (preset.sheetName) fd.set("sheetName", preset.sheetName);
+      if (preset.headerRowIndex !== undefined) {
+        fd.set("headerRowIndex", String(preset.headerRowIndex));
+      }
+      if (preset.headerRowSpan !== undefined) {
+        fd.set("headerRowSpan", String(preset.headerRowSpan));
+      }
       const res = await fetch("/api/marks/upload", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -355,11 +371,20 @@ export function DataManagementPanel() {
           </label>
           <label className="block text-xs font-medium text-muted">
             Semester
-            <input
+            <select
               value={uploadSemester}
               onChange={(e) => setUploadSemester(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-border px-3 py-2.5 text-sm outline-none ring-primary/15 focus:ring"
-            />
+              className="mt-1 w-full rounded-xl border border-border bg-white px-3 py-2.5 text-sm outline-none ring-primary/15 focus:ring"
+            >
+              {(uploadBatchYear !== ""
+                ? (BATCH_SEMESTER_MAP[uploadBatchYear] ?? [6, 8])
+                : [6, 8]
+              ).map((sem) => (
+                <option key={sem} value={String(sem)}>
+                  Semester {sem}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
       </div>
