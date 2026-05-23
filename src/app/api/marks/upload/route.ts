@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import path from "node:path";
-import { MARK_UPLOAD_KINDS, STORED_FILE_KIND, type MarkUploadKind } from "@/lib/constants";
+import {
+  getMarksImportPreset,
+  MARK_UPLOAD_KINDS,
+  STORED_FILE_KIND,
+  type MarkUploadKind,
+} from "@/lib/constants";
 import type { ImportMode } from "@/lib/importer";
 import { runExcelImport } from "@/lib/importer";
 import { prisma } from "@/lib/prisma";
@@ -36,9 +41,17 @@ export async function POST(request: NextRequest) {
     const batchYear = Number(formData.get("batchYear"));
     const semester = Number(formData.get("semester"));
     const markKindRaw = (formData.get("markKind") ?? formData.get("kind") ?? "").toString().trim();
-    const sheetName = (formData.get("sheetName")?.toString() ?? "").trim() || undefined;
+    const preset = getMarksImportPreset(batchYear, semester, markKindRaw as MarkUploadKind);
+    const sheetName =
+      (formData.get("sheetName")?.toString() ?? "").trim() || preset.sheetName || undefined;
     const headerRowText = (formData.get("headerRowIndex")?.toString() ?? "").trim();
-    const headerRowIndex = headerRowText ? Number(headerRowText) : undefined;
+    const headerRowIndex = headerRowText
+      ? Number(headerRowText)
+      : preset.headerRowIndex;
+    const headerRowSpanText = (formData.get("headerRowSpan")?.toString() ?? "").trim();
+    const headerRowSpan = headerRowSpanText
+      ? Number(headerRowSpanText)
+      : preset.headerRowSpan;
 
     if (!file || !(file instanceof File)) {
       return NextResponse.json({ message: "Excel file is required (`file` field)." }, { status: 400 });
@@ -101,6 +114,7 @@ export async function POST(request: NextRequest) {
       semester,
       sheetName,
       headerRowIndex,
+      headerRowSpan,
       mode: resolved.mode,
       reviewNumber: resolved.reviewNumber,
     });

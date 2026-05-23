@@ -11,6 +11,7 @@ async function seed() {
   await prisma.studentDocument.deleteMany();
   await prisma.storedFile.deleteMany();
   await prisma.importJob.deleteMany();
+  await prisma.studentReviewMark.deleteMany();
   await prisma.outcomeMapping.deleteMany();
   await prisma.internship.deleteMany();
   await prisma.student.deleteMany();
