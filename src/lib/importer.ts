@@ -375,7 +375,9 @@ function courseForBatchSemester(batchYear: number, semester: number) {
   return COURSE_DETAILS[`${batchYear}-${semester}`];
 }
 
-export async function importSheetPlan(plan: ExcelSheetPlan): Promise<ImportSheetResult> {
+export async function importSheetPlan(
+  plan: ExcelSheetPlan,
+): Promise<ImportSheetResult & { fileName: string }> {
   const course = courseForBatchSemester(plan.batchYear, plan.semester);
   const result = await importExcelFile({
     filePath: plan.filePath,

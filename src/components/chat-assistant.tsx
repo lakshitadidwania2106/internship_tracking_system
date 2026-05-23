@@ -65,12 +65,13 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
         }),
       });
 
+      if (!response.ok) {
+        throw new Error("failed");
+      }
+
       const data = (await response.json()) as {
         answer?: string;
         mode?: string;
-<<<<<<< HEAD
-        message?: string;
-=======
         intent?: string;
         debug?: {
           responsePath?: string;
@@ -78,11 +79,7 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
           intentSource?: string;
           fallbackTriggered?: boolean;
         };
->>>>>>> ff54da8 (fixed chatbot routing and imported student database)
       };
-      if (!response.ok) {
-        throw new Error(data.message ?? "Request failed");
-      }
 
       if (data.debug) {
         console.debug("[InternBot]", data.debug);
@@ -97,15 +94,12 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
           intent: data.intent,
         },
       ]);
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          text:
-            err instanceof Error
-              ? err.message
-              : "Could not process this now. Try again with USN or full student name in quotes.",
+          text: "Could not process this now. Try again with USN or full student name.",
         },
       ]);
     } finally {
@@ -187,33 +181,6 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
-  return (
-    <div
-      className={`max-w-[92%] whitespace-pre-wrap rounded-lg px-3 py-2 ${
-        isUser
-          ? "ml-auto bg-[var(--dsce-blue)] text-white"
-          : "border border-border bg-white text-slate-700"
-      }`}
-    >
-      {!isUser && message.intent ? (
-        <p className="mb-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--dsce-gold)]">
-          {message.intent === "invalid_query" ? (
-            "unrecognized"
-          ) : (
-            <>
-              <Sparkles className="h-3 w-3" />
-              {message.intent.replace(/_/g, " ")}
-            </>
-          )}
-        </p>
-      ) : null}
-      {message.text}
-    </div>
-  );
-}
-
 function ChatPanelHeader({
   onClose,
   selectedUsn,
@@ -244,6 +211,33 @@ function ChatPanelHeader({
       ) : (
         <p className="mt-1 text-xs text-slate-600">Per-student CO / PO / PSO from database</p>
       )}
+    </div>
+  );
+}
+
+function MessageBubble({ message }: { message: ChatMessage }) {
+  const isUser = message.role === "user";
+  return (
+    <div
+      className={`max-w-[92%] whitespace-pre-wrap rounded-lg px-3 py-2 ${
+        isUser
+          ? "ml-auto bg-[var(--dsce-blue)] text-white"
+          : "border border-border bg-white text-slate-700"
+      }`}
+    >
+      {!isUser && message.intent ? (
+        <p className="mb-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--dsce-gold)]">
+          {message.intent === "invalid_query" ? (
+            "unrecognized"
+          ) : (
+            <>
+              <Sparkles className="h-3 w-3" />
+              {message.intent.replace(/_/g, " ")}
+            </>
+          )}
+        </p>
+      ) : null}
+      {message.text}
     </div>
   );
 }
