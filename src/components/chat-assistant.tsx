@@ -8,6 +8,7 @@ type ChatMessage = {
   text: string;
   mode?: string;
   intent?: string;
+  studentUsn?: string;
 };
 
 type ChatAssistantProps = {
@@ -50,10 +51,15 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
     setLoading(true);
 
     try {
-      const priorUserTurns = messages
-        .filter((m) => m.role === "user")
-        .map((m) => m.text)
-        .slice(-4);
+      const priorTurns = messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .slice(-10)
+        .map((m) => ({
+          role: m.role,
+          content: m.text,
+          intent: m.intent,
+          studentUsn: m.studentUsn,
+        }));
 
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -61,7 +67,7 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
         body: JSON.stringify({
           question: text,
           usn: selectedUsn,
-          history: priorUserTurns,
+          turns: priorTurns,
         }),
       });
 
@@ -73,6 +79,7 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
         answer?: string;
         mode?: string;
         intent?: string;
+        studentUsn?: string;
         debug?: {
           responsePath?: string;
           primaryUsn?: string;
@@ -92,6 +99,7 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
           text: data.answer ?? "No answer returned.",
           mode: data.mode,
           intent: data.intent,
+          studentUsn: data.studentUsn,
         },
       ]);
     } catch {

@@ -206,21 +206,75 @@ export function formatCompactMapping(
   student: StudentOutcomeInput,
   profile: StudentOutcomeProfile,
 ): string {
-  const top = profile.coAlignments.filter((c) => c.score > 0).slice(0, 4);
+  const top = profile.coAlignments.filter((c) => c.score > 0).slice(0, 3);
+  const pos = [...profile.studentPOs].slice(0, 5).join(", ") || "not recorded";
+  const psos = [...profile.studentPSOs].slice(0, 3).join(", ") || "not recorded";
+  const leadCo = top[0];
+
   const lines = [
-    `Mapping snapshot — ${student.fullName} (${student.usn})`,
-    `${student.internship?.roleTitle ?? "—"} @ ${student.internship?.companyName ?? "—"}`,
-    `POs: ${formatOutcomeSet(profile.studentPOs)} | PSOs: ${formatOutcomeSet(profile.studentPSOs)}`,
-    profile.poSource === "nlp-inferred" ? "(PO/PSO inferred from role + internship text)" : "",
+    `${student.fullName} (${student.usn}) — outcome mapping`,
+    student.internship
+      ? `${student.internship.roleTitle} at ${student.internship.companyName}.`
+      : "",
     "",
-    "Top CO alignments:",
-    ...top.map(
-      (co) =>
-        `• ${co.coId} (score ${co.score}): ${co.alignedPOs.slice(0, 4).join(", ") || "no PO"} | ${co.alignedPSOs.slice(0, 2).join(", ") || "no PSO"}`,
-    ),
+    `Relevant POs: ${pos}.`,
+    `Relevant PSOs: ${psos}.`,
+    leadCo
+      ? `Strongest fit: ${leadCo.coId} — ${leadCo.title.split(".")[0] ?? leadCo.title}.`
+      : "No CO alignment computed yet.",
+    top.length > 1
+      ? `Also aligned: ${top
+          .slice(1)
+          .map((c) => c.coId)
+          .join(", ")}.`
+      : "",
     "",
-    "Ask: “Explain CO2”, “Why is PO5 mapped?”, or “Summarize internship report” for detail.",
+    'Say "explain in detail" or "full mapping" for the complete matrix breakdown.',
   ].filter(Boolean);
+
+  return lines.join("\n");
+}
+
+/** Conversational natural mapping — default chatbot tone */
+export function formatNaturalMapping(
+  student: StudentOutcomeInput,
+  profile: StudentOutcomeProfile,
+): string {
+  const top = profile.coAlignments.filter((c) => c.score > 0).slice(0, 2);
+  const pos = [...profile.studentPOs].slice(0, 4);
+  const psos = [...profile.studentPSOs].slice(0, 2);
+  const role = student.internship?.roleTitle ?? "their internship role";
+  const company = student.internship?.companyName ?? "the host company";
+
+  const coSentence = top.length
+    ? `The internship aligns best with ${top.map((c) => c.coId).join(" and ")} given ${role} at ${company}.`
+    : `Outcome mapping is limited — import or verify Excel mapping data for ${student.fullName}.`;
+
+  const poSentence = pos.length
+    ? `Recorded program outcomes include ${pos.join(", ")}${psos.length ? `, with ${psos.join(", ")}` : ""}.`
+    : profile.poSource === "nlp-inferred"
+      ? "POs/PSOs were inferred from internship text because no Excel mapping was stored."
+      : "No PO/PSO list found in imported data.";
+
+  return [coSentence, poSentence].join(" ");
+}
+
+export function formatTopOutcomes(
+  student: StudentOutcomeInput,
+  profile: StudentOutcomeProfile,
+): string {
+  const top = profile.coAlignments.filter((c) => c.score > 0).slice(0, 3);
+  if (!top.length) {
+    return `No strong CO alignments found for ${student.fullName} (${student.usn}) yet.`;
+  }
+
+  const lines = [
+    `Strongest outcomes for ${student.fullName} (${student.usn}):`,
+    ...top.map((co, i) => {
+      const po = co.alignedPOs[0]?.replace(/ \(strength.*\)/, "") ?? "—";
+      return `${i + 1}. ${co.coId} — top PO link: ${po}`;
+    }),
+  ];
   return lines.join("\n");
 }
 

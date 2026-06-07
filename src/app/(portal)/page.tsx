@@ -9,6 +9,7 @@ import {
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ChatAssistant } from "@/components/chat-assistant";
 import { DataManagementPanel } from "@/components/data-management-panel";
+import { MarksDistributionPanel } from "@/components/marks-distribution-panel";
 import { AccountSettingsPanel } from "@/components/account-settings-panel";
 import { StatusPanel } from "@/components/status-panel";
 import { PortalUserMenu } from "@/components/portal-user-menu";
@@ -241,6 +242,18 @@ export default async function Home({ searchParams }: PageProps) {
                 </table>
               </div>
             </section>
+          ) : null}
+
+          {activeTab === "marks distribution" ? (
+            <MarksDistributionPanel
+              students={allStudents}
+              batchYear={selectedBatch}
+              semester={selectedSemester}
+              focusUsn={usnQuery || undefined}
+              focusStudent={selectedStudent ?? null}
+              totalStudents={stats.totalStudents}
+              internshipCount={stats.internshipCount}
+            />
           ) : null}
 
           {activeTab === "internships" ? (

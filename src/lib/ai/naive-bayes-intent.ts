@@ -18,12 +18,21 @@ export type ChatIntent =
   | "internship_company"
   | "internship_stipend"
   | "internship_role"
-  | "student_summary";
+  | "student_summary"
+  | "student_marks"
+  | "internship_summary"
+  | "performance_analysis"
+  | "top_outcomes";
 
 type TrainingExample = { text: string; intent: ChatIntent };
 
 const TRAINING_DATA: TrainingExample[] = [
-  { text: "show co po pso mapping for student", intent: "outcomes_all" },
+  { text: "show co po pso mapping for student", intent: "outcomes_mapping" },
+  { text: "mapping for student outcomes", intent: "outcomes_mapping" },
+  { text: "give me the mapping of student", intent: "outcomes_mapping" },
+  { text: "what outcomes are mapped for student", intent: "outcomes_mapping" },
+  { text: "outcome mapping for intern", intent: "outcomes_mapping" },
+  { text: "mapped outcomes co po pso", intent: "outcomes_mapping" },
   { text: "what are the course outcomes and program outcomes", intent: "outcomes_all" },
   { text: "list all co po pso for this intern", intent: "outcomes_all" },
   { text: "outcome mapping details", intent: "outcomes_all" },
@@ -59,7 +68,24 @@ const TRAINING_DATA: TrainingExample[] = [
   { text: "job profile internship", intent: "internship_role" },
   { text: "student profile summary overview", intent: "student_summary" },
   { text: "tell me about this student intern", intent: "student_summary" },
+  { text: "tell me about student usn", intent: "student_summary" },
+  { text: "who is this student", intent: "student_summary" },
   { text: "internship details for student", intent: "student_summary" },
+  { text: "show marks for student", intent: "student_marks" },
+  { text: "review marks of student", intent: "student_marks" },
+  { text: "final marks of student", intent: "student_marks" },
+  { text: "internship score student", intent: "student_marks" },
+  { text: "what are student marks", intent: "student_marks" },
+  { text: "evaluation marks student", intent: "student_marks" },
+  { text: "how did student perform", intent: "performance_analysis" },
+  { text: "performance summary student", intent: "performance_analysis" },
+  { text: "how well did intern do", intent: "performance_analysis" },
+  { text: "summarize internship for student", intent: "internship_summary" },
+  { text: "internship summary student", intent: "internship_summary" },
+  { text: "strongest outcomes for student", intent: "top_outcomes" },
+  { text: "top mapped co po student", intent: "top_outcomes" },
+  { text: "why did student get this mapping", intent: "outcomes_justification" },
+  { text: "explain the outcomes for student", intent: "outcomes_justification" },
   { text: "why is po5 strongly mapped", intent: "outcomes_po_why" },
   { text: "explain po5 mapping for student", intent: "outcomes_po_why" },
   { text: "compare two students internship", intent: "compare_students" },

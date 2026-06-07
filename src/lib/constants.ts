@@ -8,6 +8,11 @@ export const COURSE_DETAILS: Record<
   string,
   { code: string; name: string; credits: number }
 > = {
+  "2020-8": {
+    code: "21AIL84",
+    name: "Student Internship",
+    credits: 3,
+  },
   "2021-4": {
     code: "21AIL46",
     name: "Industry Internship Preparation",
@@ -29,6 +34,7 @@ export const DASHBOARD_LINKS = [
   "Overview",
   "Students",
   "Internships",
+  "Marks Distribution",
   "Status",
   "Data Management",
   "Settings",
@@ -52,3 +58,32 @@ export const STORED_FILE_KIND = {
   INTERNSHIP_DETAILS_XLSX: "internship_details_xlsx",
   REPORTS_ZIP: "reports_zip",
 } as const;
+
+/** Default sheet/header hints for faculty uploads (matches data/imports/excel layouts). */
+export type MarksImportPreset = {
+  sheetName?: string;
+  headerRowIndex?: number;
+  headerRowSpan?: number;
+};
+
+type MarksPresetKey = `${number}-${number}-${MarkUploadKind}`;
+
+const MARKS_IMPORT_PRESETS: Partial<Record<MarksPresetKey, MarksImportPreset>> = {
+  "2020-8-internship_details": { sheetName: "sem 8  2020 batch" },
+  "2020-8-final": { sheetName: "Final Marks" },
+  "2020-8-review_1": { sheetName: "Review 1" },
+  "2021-6-final": { sheetName: "Sheet1" },
+  "2021-8-internship_details": { sheetName: "INTERNSHIP DETAILS" },
+  "2021-8-final": { sheetName: "CSV SHEET" },
+  "2021-8-review_1": { sheetName: "INTERN EVAL SHEET R1" },
+  "2021-8-review_2": { sheetName: "INTERN EVAL SHEET R2 " },
+};
+
+export function getMarksImportPreset(
+  batchYear: number,
+  semester: number,
+  markKind: MarkUploadKind,
+): MarksImportPreset {
+  const key = `${batchYear}-${semester}-${markKind}` as MarksPresetKey;
+  return MARKS_IMPORT_PRESETS[key] ?? {};
+}

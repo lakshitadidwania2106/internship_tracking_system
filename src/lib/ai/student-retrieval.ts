@@ -46,6 +46,8 @@ export type StudentRetrievalContext = {
   profile: StudentOutcomeProfile;
   documentLabels: string[];
   hasReportPdf: boolean;
+  reviewMarks: Array<{ reviewNumber: number; rowJson: string }>;
+  sourceRowRawJson: string | null;
 };
 
 const STOPWORDS = new Set([
@@ -170,6 +172,11 @@ export async function buildStudentRetrievalContext(
     profile,
     documentLabels,
     hasReportPdf,
+    reviewMarks: student.reviewMarks.map((m) => ({
+      reviewNumber: m.reviewNumber,
+      rowJson: m.rowJson,
+    })),
+    sourceRowRawJson: student.internship?.sourceRowRawJson ?? null,
   };
 }
 

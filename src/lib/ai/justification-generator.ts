@@ -30,10 +30,10 @@ function matrixStrengthFor(coId: string, outcomeCode: string): string | null {
 }
 
 function strengthWord(level: string | null): string {
-  if (level === "3") return "strong";
-  if (level === "2") return "moderate";
-  if (level === "1") return "low";
-  return "relevant";
+  if (level === "3") return "strongly";
+  if (level === "2") return "moderately";
+  if (level === "1") return "partly";
+  return "relevantly";
 }
 
 export function collectEvidencePhrases(nlp: NlpAnalysisResult): string[] {
@@ -44,6 +44,34 @@ export function collectEvidencePhrases(nlp: NlpAnalysisResult): string[] {
   return [...new Set(phrases)].slice(0, 6);
 }
 
+function roleActivityHint(nlp: NlpAnalysisResult, poCode: string): string {
+  const evidence = collectEvidencePhrases(nlp);
+  const tech =
+    evidence.length > 0
+      ? evidence.slice(0, 3).join(", ")
+      : nlp.scores.aiml >= 5
+        ? "AI/ML tools and frameworks"
+        : "engineering software and workflows";
+
+  switch (poCode) {
+    case "PO5":
+      return `worked with ${tech} and applied modern engineering tools in a practical setting`;
+    case "PO9":
+      return `collaborated in a team environment and contributed to shared deliverables`;
+    case "PO10":
+      return `documented work, presented findings, and communicated technical outcomes`;
+    case "PO7":
+    case "PO6":
+      return `addressed real-world problems with awareness of societal and sustainability context`;
+    case "PSO2":
+      return `applied AI/ML concepts during the internship (NLP signal ${nlp.scores.aiml}/10)`;
+    case "PSO3":
+      return `used cloud or scalable tooling where relevant (cloud signal ${nlp.scores.cloud}/10)`;
+    default:
+      return `applied domain knowledge through hands-on internship activities`;
+  }
+}
+
 export function generateDynamicJustification(params: {
   studentName: string;
   coId: string;
@@ -52,13 +80,10 @@ export function generateDynamicJustification(params: {
   alignment: CoAlignment;
   nlp: NlpAnalysisResult;
   poCode?: string;
+  detailed?: boolean;
 }): string {
-  const { studentName, coId, roleTitle, companyName, alignment, nlp, poCode } = params;
+  const { studentName, coId, roleTitle, companyName, alignment, nlp, poCode, detailed } = params;
   const evidence = collectEvidencePhrases(nlp);
-  const techPart =
-    evidence.length > 0
-      ? ` through activities involving ${evidence.slice(0, 4).join(", ")}`
-      : "";
 
   const topPo = poCode
     ? poCode.toUpperCase()
@@ -69,17 +94,21 @@ export function generateDynamicJustification(params: {
   const matrixLevel = matrixStrengthFor(coId, topPo);
   const poLabel = PO_LABELS[topPo] ?? topPo;
   const strength = strengthWord(matrixLevel);
+  const activity = roleActivityHint(nlp, topPo);
 
   const rolePart = roleTitle ? ` as ${roleTitle}` : "";
   const companyPart = companyName ? ` at ${companyName}` : "";
 
-  return (
-    `${studentName} demonstrates ${strength} alignment with ${coId} and ${topPo} (${poLabel})` +
-    `${rolePart}${companyPart}${techPart}. ` +
-    `NLP confidence for this profile: ${Math.round(nlp.scores.confidence * 100)}%. ` +
-    `Recorded PO/PSO overlap for ${coId}: ${alignment.alignedPOs.length ? alignment.alignedPOs.join("; ") : "—"}; ` +
-    `${alignment.alignedPSOs.length ? alignment.alignedPSOs.join("; ") : "—"}.`
-  );
+  const lead = `${topPo} is mapped because ${studentName} ${activity}${rolePart}${companyPart}. This aligns ${strength} with ${coId} (${poLabel}).`;
+
+  if (!detailed) return lead;
+
+  const techPart = evidence.length ? ` Keywords from records: ${evidence.join(", ")}.` : "";
+  const matrixPart = alignment.alignedPOs.length
+    ? ` Matrix overlap: ${alignment.alignedPOs.slice(0, 3).join("; ")}.`
+    : "";
+
+  return `${lead}${techPart}${matrixPart}`;
 }
 
 export function generatePoWhyAnswer(params: {
@@ -91,34 +120,34 @@ export function generatePoWhyAnswer(params: {
   companyName: string;
   nlp: NlpAnalysisResult;
   inStudentRecord: boolean;
+  detailed?: boolean;
 }): string {
-  const { poCode, coId, nlp, inStudentRecord } = params;
-  const matrixLevel = coId ? matrixStrengthFor(coId, poCode) : null;
-  const strength = strengthWord(matrixLevel);
+  const { poCode, coId, nlp, inStudentRecord, detailed } = params;
   const poLabel = PO_LABELS[poCode] ?? poCode;
+  const activity = roleActivityHint(nlp, poCode);
+  const rolePart = params.roleTitle ? ` as ${params.roleTitle}` : "";
+  const companyPart = params.companyName ? ` at ${params.companyName}` : "";
+
+  const recordNote = inStudentRecord
+    ? `${poCode} is listed in this student's imported outcome mapping.`
+    : `${poCode} is inferred from the internship role, company context, and project signals in stored data.`;
+
+  const coNote = coId
+    ? `The strongest course link is ${coId}, which maps to ${poCode} in the CO–PO matrix.`
+    : "";
+
+  const lead = `${poCode} (${poLabel}) applies here because ${params.studentName} ${activity}${rolePart}${companyPart}. ${recordNote}`;
+
+  if (!detailed) {
+    return [lead, coNote].filter(Boolean).join(" ");
+  }
+
   const evidence = collectEvidencePhrases(nlp);
-
-  const domainHint =
-    poCode === "PO5"
-      ? `Tool and framework usage (AI/ML score ${nlp.scores.aiml}/10, cloud ${nlp.scores.cloud}/10)`
-      : poCode === "PO9"
-        ? `Teamwork signals (score ${nlp.scores.teamwork}/10)`
-        : poCode === "PO10"
-          ? `Communication and reporting (score ${nlp.scores.communication}/10)`
-          : poCode === "PO7" || poCode === "PO6"
-            ? `Sustainability and societal impact (SDG score ${nlp.scores.sustainability}/10)`
-            : `Role and internship narrative analysis`;
-
   return [
     `${params.studentName} (${params.usn}) — Why ${poCode} is mapped`,
-    inStudentRecord
-      ? `${poCode} appears in this student's recorded relevant PO list.`
-      : `${poCode} is inferred from internship role and project signals (not explicitly listed in Excel mapping).`,
-    coId
-      ? `Course matrix links ${coId} → ${poCode} at ${strength} strength (${matrixLevel ?? "n/a"}).`
-      : `Search the CO–PO matrix for rows where ${poCode} has strength 2 or 3.`,
-    domainHint,
-    evidence.length ? `Evidence keywords: ${evidence.join(", ")}.` : "",
+    lead,
+    coNote,
+    evidence.length ? `Supporting terms: ${evidence.join(", ")}.` : "",
     generateDynamicJustification({
       studentName: params.studentName,
       coId: coId ?? "CO1",
@@ -133,6 +162,7 @@ export function generatePoWhyAnswer(params: {
       },
       nlp: params.nlp,
       poCode,
+      detailed: true,
     }),
   ]
     .filter(Boolean)

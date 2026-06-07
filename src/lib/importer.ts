@@ -17,6 +17,8 @@ export type ImportExcelOptions = {
   semester: number;
   sheetName?: string;
   headerRowIndex?: number;
+  /** When > 1, merges consecutive header rows into one column key row. */
+  headerRowSpan?: number;
   usnColumnIndex?: number;
   nameColumnIndex?: number;
   mode?: ImportMode;
@@ -65,6 +67,29 @@ function detectHeaderRow(rawRows: (string | number)[][]): number {
     }
   }
   return 0;
+}
+
+function buildHeaderRow(
+  rawRows: (string | number)[][],
+  headerRowIndex: number,
+  headerRowSpan?: number,
+): (string | number)[] {
+  const span = Math.max(1, headerRowSpan ?? 1);
+  const rows = rawRows.slice(headerRowIndex, headerRowIndex + span);
+  if (rows.length === 0) return [];
+  if (rows.length === 1) return rows[0] ?? [];
+
+  const width = Math.max(...rows.map((row) => row.length));
+  const merged: string[] = [];
+  for (let col = 0; col < width; col += 1) {
+    const parts: string[] = [];
+    for (const row of rows) {
+      const cell = String(row[col] ?? "").trim();
+      if (cell) parts.push(cell);
+    }
+    merged.push(parts.join(" ").trim());
+  }
+  return merged;
 }
 
 function findColumnIndex(header: (string | number)[], matchers: string[]): number {
@@ -206,7 +231,7 @@ export async function runExcelImport(
     defval: "",
   });
   const headerRowIndex = options.headerRowIndex ?? detectHeaderRow(rawRows);
-  const header = rawRows[headerRowIndex] ?? [];
+  const header = buildHeaderRow(rawRows, headerRowIndex, options.headerRowSpan);
   const usnColumnIndex =
     options.usnColumnIndex ?? findColumnIndex(header, ["USN"]);
   const nameColumnIndex =
