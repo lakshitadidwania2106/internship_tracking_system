@@ -1,0 +1,530 @@
+import fs from "node:fs";
+import path from "node:path";
+import * as xlsx from "xlsx";
+import { COURSE_DETAILS } from "@/lib/constants";
+import { discoverAllSheetPlans, type ExcelSheetPlan } from "@/lib/excel-discovery";
+import { normalizeUsn } from "@/lib/excel-discovery";
+import { prisma } from "@/lib/prisma";
+
+export type ImportMode = "internship" | "marks";
+
+export type ImportExcelOptions = {
+  filePath?: string;
+  buffer?: Buffer;
+  /** Display name for import logs (defaults from file path or "upload.xlsx"). */
+  sourceFileName?: string;
+  batchYear: number;
+  semester: number;
+  sheetName?: string;
+  headerRowIndex?: number;
+<<<<<<< HEAD
+  /** When the sheet uses two header rows (category + sub-column), set to 2. */
+=======
+  /** When > 1, merges consecutive header rows into one column key row. */
+>>>>>>> 7f1c9ba44d376adaa59f2c9b2b995d822cdaf4cb
+  headerRowSpan?: number;
+  usnColumnIndex?: number;
+  nameColumnIndex?: number;
+  mode?: ImportMode;
+  courseCode?: string;
+  courseName?: string;
+  credits?: number;
+  /** When set, rows update `StudentReviewMark` instead of internship/outcome rows. */
+  reviewNumber?: 1 | 2 | 3;
+};
+
+export type ImportSheetResult = {
+  imported: number;
+  rowsRead: number;
+  skippedNoUsn: number;
+  sheetName: string;
+  uniqueUsnsTouched: number;
+  fileName?: string;
+};
+
+export type BulkImportResult = {
+  filesScanned: number;
+  sheetsProcessed: number;
+  rowsRead: number;
+  rowsImported: number;
+  skippedNoUsn: number;
+  uniqueUsnsTouched: number;
+  totalStudentsInDb: number;
+  sheetResults: ImportSheetResult[];
+};
+
+function readCell(record: Record<string, unknown>, candidates: string[]): string | undefined {
+  for (const key of candidates) {
+    const value = record[key];
+    if (value !== undefined && value !== null && `${value}`.trim().length > 0) {
+      return `${value}`.trim();
+    }
+  }
+  return undefined;
+}
+
+function normalizeHeaderPart(value: unknown): string {
+  return `${value ?? ""}`.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildColumnHeaders(
+  rawRows: (string | number)[][],
+  headerRowIndex: number,
+  headerRowSpan = 1,
+): string[] {
+  const bottom = rawRows[headerRowIndex] ?? [];
+  if (headerRowSpan <= 1) {
+    return bottom.map((cell) => normalizeHeaderPart(cell));
+  }
+
+  const top = rawRows[headerRowIndex - 1] ?? [];
+  const maxLen = Math.max(bottom.length, top.length);
+  const headers: string[] = [];
+
+  for (let i = 0; i < maxLen; i += 1) {
+    const topCell = normalizeHeaderPart(top[i]);
+    const bottomCell = normalizeHeaderPart(bottom[i]);
+    if (topCell && bottomCell && topCell !== bottomCell) {
+      headers.push(`${topCell} ${bottomCell}`);
+    } else {
+      headers.push(bottomCell || topCell);
+    }
+  }
+
+  return headers;
+}
+
+function detectHeaderRow(rawRows: (string | number)[][]): number {
+  for (let index = 0; index < Math.min(rawRows.length, 50); index += 1) {
+    const row = (rawRows[index] ?? []).map((cell) => String(cell).trim().toUpperCase());
+    const joined = row.join(" | ");
+    if (joined.includes("USN") && (joined.includes("NAME") || joined.includes("STUDENT"))) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function buildHeaderRow(
+  rawRows: (string | number)[][],
+  headerRowIndex: number,
+  headerRowSpan?: number,
+): (string | number)[] {
+  const span = Math.max(1, headerRowSpan ?? 1);
+  const rows = rawRows.slice(headerRowIndex, headerRowIndex + span);
+  if (rows.length === 0) return [];
+  if (rows.length === 1) return rows[0] ?? [];
+
+  const width = Math.max(...rows.map((row) => row.length));
+  const merged: string[] = [];
+  for (let col = 0; col < width; col += 1) {
+    const parts: string[] = [];
+    for (const row of rows) {
+      const cell = String(row[col] ?? "").trim();
+      if (cell) parts.push(cell);
+    }
+    merged.push(parts.join(" ").trim());
+  }
+  return merged;
+}
+
+function findColumnIndex(header: (string | number)[], matchers: string[]): number {
+  for (let i = 0; i < header.length; i += 1) {
+    const key = String(header[i] ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, " ");
+    if (matchers.some((m) => key.includes(m))) return i;
+  }
+  return -1;
+}
+
+function readUsnFromRow(
+  row: Record<string, unknown>,
+  raw: (string | number)[],
+  usnColumnIndex: number,
+): string | null {
+  if (usnColumnIndex >= 0) {
+    const fromCol = normalizeUsn(String(raw[usnColumnIndex] ?? ""));
+    if (fromCol) return fromCol;
+  }
+  const fromNamed = normalizeUsn(readCell(row, ["USN", "Usn"]));
+  if (fromNamed) return fromNamed;
+  for (const value of Object.values(row)) {
+    const found = normalizeUsn(String(value ?? ""));
+    if (found) return found;
+  }
+  return null;
+}
+
+function readNameFromRow(
+  row: Record<string, unknown>,
+  raw: (string | number)[],
+  nameColumnIndex: number,
+): string {
+  if (nameColumnIndex >= 0) {
+    const name = String(raw[nameColumnIndex] ?? "").trim();
+    if (name) return name;
+  }
+  return readCell(row, ["NAME", "Student Name", "Name", "STUDENT NAME"]) ?? "Unknown Student";
+}
+
+export async function ensureBatchSemester(options: {
+  batchYear: number;
+  semester: number;
+  courseCode?: string;
+  courseName?: string;
+  credits?: number;
+  reviewCount?: number;
+}) {
+  const batch = await prisma.batch.upsert({
+    where: { year: options.batchYear },
+    update: {},
+    create: { year: options.batchYear },
+  });
+
+  const course = {
+    code: options.courseCode ?? `AIML${options.semester}`,
+    name: options.courseName ?? "Internship",
+    credits: options.credits ?? 3,
+  };
+
+  const semesterRecord = await prisma.semesterRecord.upsert({
+    where: {
+      batchId_semester: {
+        batchId: batch.id,
+        semester: options.semester,
+      },
+    },
+    update: {
+      courseCode: course.code,
+      courseName: course.name,
+      credits: course.credits,
+      ...(options.reviewCount !== undefined ? { reviewCount: options.reviewCount } : {}),
+    },
+    create: {
+      batchId: batch.id,
+      semester: options.semester,
+      courseCode: course.code,
+      courseName: course.name,
+      credits: course.credits,
+      reviewCount: options.reviewCount ?? 3,
+    },
+  });
+
+  return { batch, semesterRecord };
+}
+
+async function loadWorkbookBuffer(options: ImportExcelOptions): Promise<{ buffer: Buffer; label: string }> {
+  if (options.buffer) {
+    return {
+      buffer: options.buffer,
+      label: options.sourceFileName ?? path.basename(options.filePath ?? "upload.xlsx"),
+    };
+  }
+  if (!options.filePath) {
+    throw new Error("Either buffer or filePath is required.");
+  }
+  if (!fs.existsSync(options.filePath)) {
+    throw new Error(`File not found: ${options.filePath}`);
+  }
+  const buffer = await fs.promises.readFile(options.filePath);
+  return {
+    buffer,
+    label: options.sourceFileName ?? path.basename(options.filePath),
+  };
+}
+
+export async function importExcelFile(options: ImportExcelOptions) {
+  const { buffer, label } = await loadWorkbookBuffer(options);
+  return runExcelImport({
+    ...options,
+    buffer,
+    sourceFileName: label,
+  });
+}
+
+export async function runExcelImport(
+  options: ImportExcelOptions & { buffer: Buffer; sourceFileName: string },
+) {
+  const { batch, semesterRecord } = await ensureBatchSemester({
+    batchYear: options.batchYear,
+    semester: options.semester,
+    courseCode: options.courseCode,
+    courseName: options.courseName,
+    credits: options.credits,
+  });
+
+  const workbook = xlsx.read(options.buffer, { type: "buffer" });
+  const selectedSheetName = options.sheetName ?? workbook.SheetNames[0];
+  const sheet = workbook.Sheets[selectedSheetName];
+  if (!sheet) {
+    throw new Error(`Sheet not found: ${selectedSheetName}`);
+  }
+
+  const rawRows = xlsx.utils.sheet_to_json<(string | number)[]>(sheet, {
+    header: 1,
+    defval: "",
+  });
+  const headerRowSpan = options.headerRowSpan ?? 1;
+  const headerRowIndex = options.headerRowIndex ?? detectHeaderRow(rawRows);
+<<<<<<< HEAD
+  const header = buildColumnHeaders(rawRows, headerRowIndex, headerRowSpan);
+=======
+  const header = buildHeaderRow(rawRows, headerRowIndex, options.headerRowSpan);
+>>>>>>> 7f1c9ba44d376adaa59f2c9b2b995d822cdaf4cb
+  const usnColumnIndex =
+    options.usnColumnIndex ?? findColumnIndex(header, ["USN"]);
+  const nameColumnIndex =
+    options.nameColumnIndex ?? findColumnIndex(header, ["NAME", "STUDENT NAME", "STUDENT"]);
+
+  const dataStartRow = headerRowIndex + headerRowSpan;
+  const rowPairs = rawRows.slice(dataStartRow).map((raw) => {
+    const record: Record<string, unknown> = {};
+    for (let i = 0; i < header.length; i += 1) {
+      const key = header[i];
+      if (key) {
+        record[key] = raw[i];
+      }
+    }
+    return { record, raw };
+  });
+
+  let imported = 0;
+  let skippedNoUsn = 0;
+  const touchedUsns = new Set<string>();
+  const mode = options.mode ?? "internship";
+  const reviewNumber = options.reviewNumber;
+
+  for (const { record: row, raw } of rowPairs) {
+    const usn = readUsnFromRow(row, raw, usnColumnIndex);
+    if (!usn) {
+      skippedNoUsn += 1;
+      continue;
+    }
+
+    const fullName = readNameFromRow(row, raw, nameColumnIndex);
+    touchedUsns.add(usn);
+
+    const student = await prisma.student.upsert({
+      where: { usn },
+      update: {
+        fullName,
+        batchId: batch.id,
+        semesterRecordId: semesterRecord.id,
+      },
+      create: {
+        usn,
+        fullName,
+        batchId: batch.id,
+        semesterRecordId: semesterRecord.id,
+      },
+    });
+
+    if (reviewNumber) {
+      await prisma.studentReviewMark.upsert({
+        where: {
+          studentId_reviewNumber: {
+            studentId: student.id,
+            reviewNumber,
+          },
+        },
+        update: {
+          rowJson: JSON.stringify(row),
+        },
+        create: {
+          studentId: student.id,
+          reviewNumber,
+          rowJson: JSON.stringify(row),
+        },
+      });
+      imported += 1;
+      continue;
+    }
+
+    const companyName =
+      readCell(row, ["Company Name", "COMPANY NAME", "INTERNSHIP COMPANY NAME"]) ?? "Not Provided";
+    const roleTitle =
+      readCell(row, ["Domain( Title)", "Job Role", "Domain", "Role", "INTERNSHIP ROLE"]) ?? "Intern";
+    const stipend = readCell(row, ["Stipend", "STIPEND YES /NO"]);
+    const duration = readCell(row, ["DURATION"]);
+    const fromDate = readCell(row, ["From date", "From Date", "Start Date"]);
+    const toDate = readCell(row, ["To Date", "To date", "End Date"]);
+    const relevantPOs = readCell(row, ["Relevant POs"]);
+    const relevantPSOs = readCell(row, ["Relevant PSOs"]);
+    const totalMarks = readCell(row, ["TOTAL\n(100)", "TOTAL (100)", "Max-100", "TOTAL"]);
+    const reportMarks = readCell(row, ["Report\n(10)", "Report (10)", "Report"]);
+    const presentationMarks = readCell(row, ["Presentation\n(10)", "Presentation (10)"]);
+    const evaluatorName = readCell(row, ["Evaluator Names"]);
+    const internshipTitle = readCell(row, ["INTERNSHIP TITLE"]);
+
+    const existingInternship = await prisma.internship.findUnique({ where: { studentId: student.id } });
+    const existingRowRaw = existingInternship?.sourceRowRawJson
+      ? (JSON.parse(existingInternship.sourceRowRawJson) as Record<string, unknown>)
+      : {};
+
+    const prevEval =
+      existingRowRaw.evaluation && typeof existingRowRaw.evaluation === "object"
+        ? (existingRowRaw.evaluation as Record<string, unknown>)
+        : {};
+
+    const evaluation = {
+      ...prevEval,
+      ...(totalMarks ? { totalMarks } : {}),
+      ...(reportMarks ? { reportMarks } : {}),
+      ...(presentationMarks ? { presentationMarks } : {}),
+      ...(evaluatorName ? { evaluatorName } : {}),
+      ...(internshipTitle ? { internshipTitle } : {}),
+    };
+
+    const storedPayload: Record<string, unknown> = {
+      ...existingRowRaw,
+      ...row,
+      evaluation,
+    };
+
+    if (mode === "marks") {
+      storedPayload.finalMarksSheet = { ...row };
+    } else {
+      storedPayload.internshipSheet = { ...row };
+      const prevFinal =
+        existingRowRaw.finalMarksSheet && typeof existingRowRaw.finalMarksSheet === "object"
+          ? (existingRowRaw.finalMarksSheet as Record<string, unknown>)
+          : {};
+      storedPayload.finalMarksSheet = prevFinal;
+    }
+
+    await prisma.internship.upsert({
+      where: { studentId: student.id },
+      update: {
+        companyName: mode === "marks" ? existingInternship?.companyName ?? companyName : companyName,
+        roleTitle: mode === "marks" ? existingInternship?.roleTitle ?? roleTitle : roleTitle,
+        stipend: mode === "marks" ? existingInternship?.stipend ?? stipend : stipend,
+        durationText: mode === "marks" ? existingInternship?.durationText ?? duration : duration,
+        startDateRaw: mode === "marks" ? existingInternship?.startDateRaw ?? fromDate : fromDate,
+        endDateRaw: mode === "marks" ? existingInternship?.endDateRaw ?? toDate : toDate,
+        grade: totalMarks
+          ? `Total: ${totalMarks}`
+          : existingInternship?.grade ??
+            (prevEval.totalMarks ? `Total: ${prevEval.totalMarks}` : undefined),
+        sourceRowRawJson: JSON.stringify(storedPayload),
+      },
+      create: {
+        studentId: student.id,
+        companyName,
+        roleTitle,
+        stipend,
+        durationText: duration,
+        startDateRaw: fromDate,
+        endDateRaw: toDate,
+        grade: totalMarks ? `Total: ${totalMarks}` : null,
+        sourceRowRawJson: JSON.stringify(storedPayload),
+      },
+    });
+
+    const mappingUpdate: {
+      relevantPOs?: string | null;
+      relevantPSOs?: string | null;
+      sourceRowRawJson: string;
+    } = {
+      sourceRowRawJson: JSON.stringify(row),
+    };
+    if (relevantPOs) mappingUpdate.relevantPOs = relevantPOs;
+    if (relevantPSOs) mappingUpdate.relevantPSOs = relevantPSOs;
+
+    await prisma.outcomeMapping.upsert({
+      where: { studentId: student.id },
+      update: mappingUpdate,
+      create: {
+        studentId: student.id,
+        relevantPOs: relevantPOs ?? null,
+        relevantPSOs: relevantPSOs ?? null,
+        sourceRowRawJson: JSON.stringify(row),
+      },
+    });
+
+    imported += 1;
+  }
+
+  await prisma.importJob.create({
+    data: {
+      sourceFileName: options.sourceFileName,
+      batchYear: options.batchYear,
+      semester: options.semester,
+      status: "completed",
+      rowsRead: rowPairs.length,
+      rowsImported: imported,
+    },
+  });
+
+  return {
+    imported,
+    rowsRead: rowPairs.length,
+    skippedNoUsn,
+    sheetName: selectedSheetName,
+    uniqueUsnsTouched: touchedUsns.size,
+  };
+}
+
+function courseForBatchSemester(batchYear: number, semester: number) {
+  return COURSE_DETAILS[`${batchYear}-${semester}`];
+}
+
+export async function importSheetPlan(
+  plan: ExcelSheetPlan,
+): Promise<ImportSheetResult & { fileName: string }> {
+  const course = courseForBatchSemester(plan.batchYear, plan.semester);
+  const result = await importExcelFile({
+    filePath: plan.filePath,
+    batchYear: plan.batchYear,
+    semester: plan.semester,
+    sheetName: plan.sheetName,
+    headerRowIndex: plan.headerRowIndex,
+    usnColumnIndex: plan.usnColumnIndex,
+    nameColumnIndex: plan.nameColumnIndex,
+    mode: plan.mode,
+    reviewNumber: plan.reviewNumber,
+    courseCode: course?.code,
+    courseName: course?.name,
+    credits: course?.credits,
+    sourceFileName: `${plan.fileName} :: ${plan.sheetName}`,
+  });
+  return { ...result, fileName: plan.fileName };
+}
+
+/** Import every Excel/CSV sheet under data/imports/excel that contains a USN column. */
+export async function importAllRepositoryExcel(
+  excelRoot = path.join(process.cwd(), "data", "imports", "excel"),
+): Promise<BulkImportResult> {
+  const plans = discoverAllSheetPlans(excelRoot);
+  const filesScanned = new Set(plans.map((p) => p.filePath)).size;
+
+  const sheetResults: BulkImportResult["sheetResults"] = [];
+  let rowsRead = 0;
+  let rowsImported = 0;
+  let skippedNoUsn = 0;
+  const allUsns = new Set<string>();
+
+  for (const plan of plans) {
+    const result = await importSheetPlan(plan);
+    sheetResults.push(result);
+    rowsRead += result.rowsRead;
+    rowsImported += result.imported;
+    skippedNoUsn += result.skippedNoUsn;
+  }
+
+  const totalStudentsInDb = await prisma.student.count();
+  const students = await prisma.student.findMany({ select: { usn: true } });
+  for (const s of students) allUsns.add(s.usn);
+
+  return {
+    filesScanned,
+    sheetsProcessed: plans.length,
+    rowsRead,
+    rowsImported,
+    skippedNoUsn,
+    uniqueUsnsTouched: allUsns.size,
+    totalStudentsInDb,
+    sheetResults,
+  };
+}

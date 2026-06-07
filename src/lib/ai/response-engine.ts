@@ -12,6 +12,7 @@ import {
   parseUserQuery,
   resolveCompareUsns,
   resolvePrimaryUsn,
+  type ChatTurn,
 } from "@/lib/ai/query-parser";
 import type { StudentRetrievalContext } from "@/lib/ai/student-retrieval";
 import {
@@ -19,10 +20,17 @@ import {
   loadStudentRecord,
 } from "@/lib/ai/student-retrieval";
 import {
+  formatStudentMarksAnswer,
+  formatPerformanceSummary,
+  marksSummaryLine,
+} from "@/lib/ai/student-marks-formatter";
+import {
   formatCompactMapping,
   formatFullOutcomeAnswer,
+  formatNaturalMapping,
   formatPoAnswer,
   formatPsoAnswer,
+  formatTopOutcomes,
   getTopTechnologies,
   type StudentOutcomeInput,
 } from "@/lib/ai/student-outcomes";
@@ -37,10 +45,10 @@ export type EngineResponse = {
 };
 
 const INVALID_MSG =
-  "I couldn't understand your query. Try:\n• show mapping for 1DS21AI001\n• explain CO2 for 1DS21AI001\n• why is PO5 mapped for 1DS21AI001\n• compare 1DS21AI001 and 1DS21AI002\n• summarize internship report for 1DS21AI001";
+  "I couldn't understand that. Try:\n• mapping for 1DS21AI004\n• marks for 1DS21AI004\n• tell me about 1DS21AI004\n• why is PO5 mapped for 1DS21AI004\n• compare 1DS21AI001 and 1DS21AI002";
 
 const GREETING_MSG =
-  "Hello! I'm InternBot. Ask about a student's CO, PO, or PSO using their USN, or select a student on the dashboard and ask about their mapping, report, or outcomes.";
+  "Hello! I'm InternBot. Ask naturally about a student's mapping, marks, company, or performance — include a USN or select a student on the dashboard.";
 
 function toOutcomeInput(ctx: StudentRetrievalContext): StudentOutcomeInput {
   return {
@@ -77,15 +85,12 @@ function inferCoForPo(ctx: StudentRetrievalContext, poCode: string): string {
 
 function formatAnalytics(ctx: StudentRetrievalContext): string {
   const i = ctx.internship;
-  const e = ctx.evaluation;
   return [
-    `[Analytics] ${ctx.fullName} (${ctx.usn})`,
-    `Batch ${ctx.batchYear}, Semester ${ctx.semester}.`,
-    i ? `Placement: ${i.roleTitle} at ${i.companyName}.` : "No internship on file.",
-    i ? `Stipend ${i.stipend ?? "—"}, grade ${i.grade ?? "—"}, status ${i.status ?? "—"}.` : "",
-    e.totalMarks ? `Marks: total ${e.totalMarks}, report ${e.reportMarks ?? "—"}, presentation ${e.presentationMarks ?? "—"}.` : "",
-    `Lead CO: ${ctx.profile.coAlignments[0]?.coId} (score ${ctx.profile.coAlignments[0]?.score ?? 0}).`,
-    `Signals — AI/ML ${ctx.nlp.scores.aiml}, research ${ctx.nlp.scores.research}, teamwork ${ctx.nlp.scores.teamwork}, SDG ${ctx.nlp.scores.sustainability}.`,
+    `${ctx.fullName} (${ctx.usn}) — internship analytics`,
+    i ? `${i.roleTitle} at ${i.companyName}. Stipend ${i.stipend ?? "—"}, grade ${i.grade ?? "—"}.` : "",
+    ctx.evaluation.totalMarks ? `Marks: ${ctx.evaluation.totalMarks} total.` : "",
+    `Lead CO: ${ctx.profile.coAlignments[0]?.coId ?? "—"}.`,
+    marksSummaryLine(ctx),
   ]
     .filter(Boolean)
     .join("\n");
@@ -93,42 +98,61 @@ function formatAnalytics(ctx: StudentRetrievalContext): string {
 
 function formatSdgAlignment(ctx: StudentRetrievalContext): string {
   const co4 = ctx.profile.coAlignments.find((c) => c.coId === "CO4");
+  const terms = ctx.nlp.detectedKeywords.sustainability;
   return [
-    `[SDG / Sustainability] ${ctx.fullName} (${ctx.usn})`,
-    `Sustainability score ${ctx.nlp.scores.sustainability}/10; ethics ${ctx.nlp.scores.ethics}/10.`,
-    ctx.nlp.detectedKeywords.sustainability.length
-      ? `Terms: ${ctx.nlp.detectedKeywords.sustainability.join(", ")}.`
-      : "No explicit SDG terms in stored data.",
-    co4 ? `CO4 alignment score ${co4.score}: ${co4.alignedPOs.join("; ") || "—"}.` : "",
+    `${ctx.fullName} (${ctx.usn}) — sustainability / SDG alignment`,
+    terms.length
+      ? `Themes in stored data: ${terms.join(", ")}.`
+      : "No explicit sustainability keywords in imported records.",
+    co4 ? `${co4.coId} is the strongest sustainability-related course outcome for this profile.` : "",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function formatReportSummary(ctx: StudentRetrievalContext): string {
+function formatReportSummary(ctx: StudentRetrievalContext, detailed: boolean): string {
   const tech = getTopTechnologies(ctx.nlp);
-  return [
-    `[Report summary] ${ctx.fullName} (${ctx.usn})`,
+  const lines = [
+    `${ctx.fullName} (${ctx.usn}) — internship report summary`,
     ctx.internship
       ? `${ctx.internship.roleTitle} at ${ctx.internship.companyName} (${ctx.internship.status ?? "—"}).`
       : "",
+    ctx.mapping?.coMappingSummary ?? "",
+    tech.length ? `Technologies / themes: ${tech.join(", ")}.` : "",
+    `Primary COs: ${ctx.profile.coAlignments.slice(0, 2).map((c) => c.coId).join(", ") || "—"}.`,
+  ].filter(Boolean);
+
+  if (detailed && ctx.excelRowSnippet) {
+    lines.push("", `Record excerpt: ${ctx.excelRowSnippet.slice(0, 400)}…`);
+  }
+  return lines.join("\n");
+}
+
+function formatInternshipSummary(ctx: StudentRetrievalContext): string {
+  const i = ctx.internship;
+  if (!i) {
+    return `${ctx.fullName} (${ctx.usn}) has no internship record imported yet.`;
+  }
+  const duration =
+    i.durationText ?? `${i.startDateRaw ?? "—"} to ${i.endDateRaw ?? "—"}`;
+  return [
+    `${ctx.fullName} interned as ${i.roleTitle} at ${i.companyName}.`,
+    `Duration: ${duration}. Status: ${i.status ?? "—"}.`,
+    i.stipend ? `Stipend: ${i.stipend}.` : "",
+    marksSummaryLine(ctx) !== "Marks not imported yet" ? `Performance: ${marksSummaryLine(ctx)}.` : "",
     ctx.mapping?.coMappingSummary ? ctx.mapping.coMappingSummary : "",
-    ctx.excelRowSnippet ? `Record excerpt: ${ctx.excelRowSnippet.slice(0, 400)}…` : "",
-    tech.length ? `Detected themes: ${tech.join(", ")}.` : "",
-    `Primary COs: ${ctx.profile.coAlignments.slice(0, 2).map((c) => c.coId).join(", ")}.`,
   ]
     .filter(Boolean)
-    .join("\n");
+    .join(" ");
 }
 
 function formatTechnologiesForCo(ctx: StudentRetrievalContext, coId: string): string {
   const tech = getTopTechnologies(ctx.nlp);
-  const alignment = ctx.profile.coAlignments.find((c) => c.coId === coId);
+  const coMeta = INTERNSHIP_COS.find((c) => c.id === coId);
   return [
-    `[Technologies → ${coId}] ${ctx.fullName} (${ctx.usn})`,
-    INTERNSHIP_COS.find((c) => c.id === coId)?.title ?? "",
-    tech.length ? `Tools/methods: ${tech.join(", ")}.` : "Inferred from role and stored fields only.",
-    alignment ? `Links: ${alignment.alignedPOs.join("; ") || "—"}.` : "",
+    `${ctx.fullName} (${ctx.usn}) — ${coId} technology link`,
+    coMeta?.title ?? "",
+    tech.length ? `Tools and methods detected: ${tech.join(", ")}.` : "Inferred from role and stored fields.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -137,52 +161,67 @@ function formatTechnologiesForCo(ctx: StudentRetrievalContext, coId: string): st
 function formatCompare(ctxList: StudentRetrievalContext[]): string {
   const [a, b] = ctxList;
   return [
-    `[Compare] ${a.usn} vs ${b.usn}`,
+    `Comparing ${a.fullName} (${a.usn}) vs ${b.fullName} (${b.usn})`,
     "",
     `${a.fullName}: ${a.internship?.roleTitle ?? "—"} @ ${a.internship?.companyName ?? "—"}`,
-    `  POs ${[...a.profile.studentPOs].join(", ") || "—"} | top CO ${a.profile.coAlignments[0]?.coId} (${a.profile.coAlignments[0]?.score})`,
+    `  POs: ${[...a.profile.studentPOs].join(", ") || "—"} | Lead CO: ${a.profile.coAlignments[0]?.coId ?? "—"}`,
+    `  ${marksSummaryLine(a)}`,
     "",
     `${b.fullName}: ${b.internship?.roleTitle ?? "—"} @ ${b.internship?.companyName ?? "—"}`,
-    `  POs ${[...b.profile.studentPOs].join(", ") || "—"} | top CO ${b.profile.coAlignments[0]?.coId} (${b.profile.coAlignments[0]?.score})`,
-    "",
-    `AI/ML signal: ${a.nlp.scores.aiml} vs ${b.nlp.scores.aiml}. SDG signal: ${a.nlp.scores.sustainability} vs ${b.nlp.scores.sustainability}.`,
+    `  POs: ${[...b.profile.studentPOs].join(", ") || "—"} | Lead CO: ${b.profile.coAlignments[0]?.coId ?? "—"}`,
+    `  ${marksSummaryLine(b)}`,
   ].join("\n");
 }
 
-function formatCoExplain(ctx: StudentRetrievalContext, coId: string): string {
+function formatCoExplain(ctx: StudentRetrievalContext, coId: string, detailed: boolean): string {
   const alignment = ctx.profile.coAlignments.find((c) => c.coId === coId);
   const coMeta = INTERNSHIP_COS.find((c) => c.id === coId);
+  if (!alignment) {
+    return `No ${coId} alignment data for ${ctx.fullName} (${ctx.usn}).`;
+  }
+
+  const lead = generateDynamicJustification({
+    studentName: ctx.fullName,
+    coId,
+    roleTitle: ctx.internship?.roleTitle ?? "",
+    companyName: ctx.internship?.companyName ?? "",
+    alignment,
+    nlp: ctx.nlp,
+    detailed,
+  });
+
+  if (!detailed) return `${coMeta?.title ?? coId}\n\n${lead}`;
+
+  const evidence = collectEvidencePhrases(ctx.nlp);
   return [
-    `[Explain ${coId}] ${ctx.fullName} (${ctx.usn})`,
+    `${ctx.fullName} (${ctx.usn}) — ${coId}`,
     coMeta?.title ?? "",
-    `POs: ${[...ctx.profile.studentPOs].join(", ") || "—"} | PSOs: ${[...ctx.profile.studentPSOs].join(", ") || "—"}`,
-    alignment
-      ? `Matrix overlap: ${alignment.alignedPOs.join("; ") || "—"} | ${alignment.alignedPSOs.join("; ") || "—"}`
-      : "No matrix overlap for this CO.",
-    "",
-    alignment
-      ? generateDynamicJustification({
-          studentName: ctx.fullName,
-          coId,
-          roleTitle: ctx.internship?.roleTitle ?? "",
-          companyName: ctx.internship?.companyName ?? "",
-          alignment,
-          nlp: ctx.nlp,
-        })
-      : "",
-    collectEvidencePhrases(ctx.nlp).length
-      ? `Evidence: ${collectEvidencePhrases(ctx.nlp).join(", ")}.`
-      : "",
+    lead,
+    evidence.length ? `Evidence: ${evidence.join(", ")}.` : "",
+    `Matrix: ${alignment.alignedPOs.join("; ") || "—"}`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function formatJustification(ctx: StudentRetrievalContext): string {
-  const top = ctx.profile.coAlignments.filter((c) => c.score > 0).slice(0, 2);
-  return [
-    `[Justification] ${ctx.fullName} (${ctx.usn})`,
-    ...top.map((co) =>
+function formatJustification(ctx: StudentRetrievalContext, detailed: boolean): string {
+  const top = ctx.profile.coAlignments.filter((c) => c.score > 0).slice(0, detailed ? 3 : 2);
+  if (!top.length) {
+    return `${ctx.fullName} (${ctx.usn}): I need imported PO/PSO mapping or a clearer internship record to explain why these outcomes apply.`;
+  }
+
+  const tech = getTopTechnologies(ctx.nlp);
+  const intro = [
+    `Why ${ctx.fullName}'s mapping makes sense:`,
+    ctx.internship
+      ? `As ${ctx.internship.roleTitle} at ${ctx.internship.companyName}, the internship activities support the recorded CO–PO links.`
+      : "",
+    tech.length ? `Key themes: ${tech.slice(0, 4).join(", ")}.` : "",
+    "",
+  ].filter(Boolean);
+
+  const body = top
+    .map((co) =>
       generateDynamicJustification({
         studentName: ctx.fullName,
         coId: co.coId,
@@ -190,9 +229,39 @@ function formatJustification(ctx: StudentRetrievalContext): string {
         companyName: ctx.internship?.companyName ?? "",
         alignment: co,
         nlp: ctx.nlp,
+        detailed,
       }),
-    ),
-  ].join("\n\n");
+    )
+    .join("\n\n");
+
+  return [...intro, body].join("\n");
+}
+
+function formatStudentSummary(ctx: StudentRetrievalContext): string {
+  const i = ctx.internship;
+  const topCo = ctx.profile.coAlignments[0];
+  const topPo = [...ctx.profile.studentPOs].slice(0, 3).join(", ") || "—";
+  const topPso = [...ctx.profile.studentPSOs].slice(0, 2).join(", ") || "—";
+
+  const lines = [
+    `Student: ${ctx.fullName}`,
+    `USN: ${ctx.usn}`,
+    i ? `Company: ${i.companyName}` : "Company: not on file",
+    i ? `Role: ${i.roleTitle}` : "Role: not on file",
+    "",
+    "Performance:",
+    `• ${marksSummaryLine(ctx)}`,
+    "",
+    "Strongest outcomes:",
+    topCo ? `• ${topCo.coId} — ${topCo.title.split(".")[0] ?? topCo.title}` : "• —",
+    `• PO: ${topPo}`,
+    `• PSO: ${topPso}`,
+    "",
+    "Overall:",
+    formatNaturalMapping(toOutcomeInput(ctx), ctx.profile),
+  ];
+
+  return lines.join("\n");
 }
 
 function buildDebug(
@@ -260,13 +329,16 @@ function routeToFormatter(
   question: string,
   coId: string,
   poId: string | null,
+  wantsDetail: boolean,
 ): { answer: string; path: string } {
   const input = toOutcomeInput(ctx);
   const tech = getTopTechnologies(ctx.nlp);
 
   switch (intent) {
     case "outcomes_mapping":
-      return { path: "compact_mapping", answer: formatCompactMapping(input, ctx.profile) };
+      return wantsDetail
+        ? { path: "compact_mapping", answer: formatCompactMapping(input, ctx.profile) }
+        : { path: "natural_mapping", answer: formatNaturalMapping(input, ctx.profile) };
     case "outcomes_po_why": {
       const poCode = inferPoCodeForWhy(ctx, poId, question);
       const coForPo = extractCoId(question) ?? inferCoForPo(ctx, poCode);
@@ -281,40 +353,65 @@ function routeToFormatter(
           companyName: ctx.internship?.companyName ?? "",
           nlp: ctx.nlp,
           inStudentRecord: ctx.profile.studentPOs.has(poCode),
+          detailed: wantsDetail,
         }),
       };
     }
     case "outcomes_co":
-      return { path: "explain_co", answer: formatCoExplain(ctx, coId) };
+      return { path: "explain_co", answer: formatCoExplain(ctx, coId, wantsDetail) };
     case "outcomes_po":
-      return { path: "list_po", answer: formatPoAnswer(input, ctx.profile) };
+      return wantsDetail
+        ? { path: "list_po", answer: formatPoAnswer(input, ctx.profile) }
+        : {
+            path: "list_po_brief",
+            answer: `${ctx.fullName}'s relevant POs: ${[...ctx.profile.studentPOs].join(", ") || "not recorded"}.`,
+          };
     case "outcomes_pso":
-      return { path: "list_pso", answer: formatPsoAnswer(input, ctx.profile) };
+      return wantsDetail
+        ? { path: "list_pso", answer: formatPsoAnswer(input, ctx.profile) }
+        : {
+            path: "list_pso_brief",
+            answer: `${ctx.fullName}'s relevant PSOs: ${[...ctx.profile.studentPSOs].join(", ") || "not recorded"}.`,
+          };
     case "outcomes_justification":
-      return { path: "justification", answer: formatJustification(ctx) };
+      return { path: "justification", answer: formatJustification(ctx, wantsDetail) };
     case "sdg_alignment":
       return { path: "sdg", answer: formatSdgAlignment(ctx) };
     case "internship_analytics":
       return { path: "analytics", answer: formatAnalytics(ctx) };
     case "report_summary":
-      return { path: "report_summary", answer: formatReportSummary(ctx) };
+      return { path: "report_summary", answer: formatReportSummary(ctx, wantsDetail) };
     case "technologies_co":
       return { path: "technologies", answer: formatTechnologiesForCo(ctx, coId) };
     case "internship_company":
       return {
         path: "company",
-        answer: `[Company] ${ctx.fullName} (${ctx.usn}) interned at ${ctx.internship?.companyName ?? "not in records"}.`,
+        answer: ctx.internship
+          ? `${ctx.fullName} (${ctx.usn}) is interning at ${ctx.internship.companyName}.`
+          : `${ctx.fullName} (${ctx.usn}): company not found in imported records.`,
       };
     case "internship_stipend":
       return {
         path: "stipend",
-        answer: `[Stipend] ${ctx.fullName} (${ctx.usn}): ${ctx.internship?.stipend ?? "not recorded"}.`,
+        answer: `${ctx.fullName} (${ctx.usn}): stipend ${ctx.internship?.stipend ?? "not recorded"}.`,
       };
     case "internship_role":
       return {
         path: "role",
-        answer: `[Role] ${ctx.fullName} (${ctx.usn}): ${ctx.internship?.roleTitle ?? "—"} at ${ctx.internship?.companyName ?? "—"}.`,
+        answer: ctx.internship
+          ? `${ctx.fullName} (${ctx.usn}) worked as ${ctx.internship.roleTitle} at ${ctx.internship.companyName}.`
+          : `${ctx.fullName} (${ctx.usn}): role not found in records.`,
       };
+    case "student_marks":
+      return { path: "student_marks", answer: formatStudentMarksAnswer(ctx) };
+    case "performance_analysis":
+      return { path: "performance", answer: formatPerformanceSummary(ctx) };
+    case "internship_summary":
+      return { path: "internship_summary", answer: formatInternshipSummary(ctx) };
+    case "top_outcomes":
+      return { path: "top_outcomes", answer: formatTopOutcomes(input, ctx.profile) };
+    case "student_summary":
+      return { path: "student_summary", answer: formatStudentSummary(ctx) };
     case "outcomes_all":
       return {
         path: "full_co_dump",
@@ -323,17 +420,6 @@ function routeToFormatter(
           technologies: tech,
         }),
       };
-    case "student_summary":
-      return {
-        path: "brief_summary",
-        answer: [
-          `[Overview] ${ctx.fullName} (${ctx.usn})`,
-          ctx.internship
-            ? `${ctx.internship.roleTitle} @ ${ctx.internship.companyName}.`
-            : "No internship.",
-          `POs: ${[...ctx.profile.studentPOs].join(", ") || "—"}. Lead CO: ${ctx.profile.coAlignments[0]?.coId ?? "—"}.`,
-        ].join("\n"),
-      };
     default:
       return { path: "unexpected_intent", answer: INVALID_MSG };
   }
@@ -341,15 +427,17 @@ function routeToFormatter(
 
 export async function answerFromRetrieval(
   question: string,
-  options?: { usn?: string; history?: string[] },
+  options?: { usn?: string; history?: string[]; turns?: ChatTurn[] },
 ): Promise<EngineResponse> {
   const parsed = parseUserQuery(question, {
     hintUsn: options?.usn,
     history: options?.history,
+    turns: options?.turns,
   });
 
   const coId = parsed.coId ?? "CO1";
   const primaryUsn = resolvePrimaryUsn(parsed);
+  const effectiveDetail = parsed.wantsDetail || parsed.expandPrevious;
 
   if (parsed.intent === "invalid_query" || !parsed.isRecognizable) {
     return respondInvalid(parsed, question, "fallback_invalid");
@@ -389,12 +477,12 @@ export async function answerFromRetrieval(
       };
     }
 
-    const { answer, path } = { answer: formatCompare(contexts), path: "compare" };
+    const answer = formatCompare(contexts);
     const debug = buildDebug(
       question,
       parsed,
       null,
-      path,
+      "compare",
       false,
       contexts.map((c) => c.usn),
     );
@@ -429,7 +517,14 @@ export async function answerFromRetrieval(
     };
   }
 
-  const { answer, path } = routeToFormatter(parsed.intent, ctx, question, coId, parsed.poId);
+  const { answer, path } = routeToFormatter(
+    parsed.intent,
+    ctx,
+    question,
+    coId,
+    parsed.poId,
+    effectiveDetail,
+  );
   const debug = buildDebug(question, parsed, primaryUsn, path, false, [ctx.usn]);
   logChatDebug(debug);
 

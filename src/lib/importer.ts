@@ -17,7 +17,7 @@ export type ImportExcelOptions = {
   semester: number;
   sheetName?: string;
   headerRowIndex?: number;
-  /** When the sheet uses two header rows (category + sub-column), set to 2. */
+  /** When > 1, merges header rows (category + sub-column or consecutive rows). */
   headerRowSpan?: number;
   usnColumnIndex?: number;
   nameColumnIndex?: number;
@@ -99,6 +99,29 @@ function detectHeaderRow(rawRows: (string | number)[][]): number {
     }
   }
   return 0;
+}
+
+function buildHeaderRow(
+  rawRows: (string | number)[][],
+  headerRowIndex: number,
+  headerRowSpan?: number,
+): (string | number)[] {
+  const span = Math.max(1, headerRowSpan ?? 1);
+  const rows = rawRows.slice(headerRowIndex, headerRowIndex + span);
+  if (rows.length === 0) return [];
+  if (rows.length === 1) return rows[0] ?? [];
+
+  const width = Math.max(...rows.map((row) => row.length));
+  const merged: string[] = [];
+  for (let col = 0; col < width; col += 1) {
+    const parts: string[] = [];
+    for (const row of rows) {
+      const cell = String(row[col] ?? "").trim();
+      if (cell) parts.push(cell);
+    }
+    merged.push(parts.join(" ").trim());
+  }
+  return merged;
 }
 
 function findColumnIndex(header: (string | number)[], matchers: string[]): number {
@@ -241,7 +264,12 @@ export async function runExcelImport(
   });
   const headerRowSpan = options.headerRowSpan ?? 1;
   const headerRowIndex = options.headerRowIndex ?? detectHeaderRow(rawRows);
-  const header = buildColumnHeaders(rawRows, headerRowIndex, headerRowSpan);
+  const header =
+    headerRowSpan > 1
+      ? buildColumnHeaders(rawRows, headerRowIndex, headerRowSpan)
+      : buildHeaderRow(rawRows, headerRowIndex, headerRowSpan).map((cell) =>
+          normalizeHeaderPart(cell),
+        );
   const usnColumnIndex =
     options.usnColumnIndex ?? findColumnIndex(header, ["USN"]);
   const nameColumnIndex =
@@ -439,7 +467,9 @@ function courseForBatchSemester(batchYear: number, semester: number) {
   return COURSE_DETAILS[`${batchYear}-${semester}`];
 }
 
-export async function importSheetPlan(plan: ExcelSheetPlan): Promise<ImportSheetResult> {
+export async function importSheetPlan(
+  plan: ExcelSheetPlan,
+): Promise<ImportSheetResult & { fileName: string }> {
   const course = courseForBatchSemester(plan.batchYear, plan.semester);
   const result = await importExcelFile({
     filePath: plan.filePath,
