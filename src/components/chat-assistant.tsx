@@ -68,9 +68,7 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
       const data = (await response.json()) as {
         answer?: string;
         mode?: string;
-<<<<<<< HEAD
         message?: string;
-=======
         intent?: string;
         debug?: {
           responsePath?: string;
@@ -78,7 +76,6 @@ export function ChatAssistant({ selectedUsn, selectedName }: ChatAssistantProps)
           intentSource?: string;
           fallbackTriggered?: boolean;
         };
->>>>>>> ff54da8 (fixed chatbot routing and imported student database)
       };
       if (!response.ok) {
         throw new Error(data.message ?? "Request failed");

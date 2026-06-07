@@ -213,9 +213,14 @@ export function extractFinalTotal(row: MarksRow): number | null {
       row,
       (n) =>
         (n.includes("total") || n.includes("grand") || n.includes("max")) &&
-        (n.includes("100") || n.includes("marks")) &&
+        (n.includes("100") || n.includes("marks") || n.includes("max-100") || n.includes("max 100")) &&
         !n.includes("reduced"),
-    ) ?? row["evaluation.totalMarks"];
+    ) ??
+    readMarkByPattern(
+      row,
+      (n) => (n === "total" || n.includes("grand total") || n === "max-100") && !n.includes("reduced"),
+    ) ??
+    row["evaluation.totalMarks"];
   const num = parseNumeric(totalStr ?? undefined);
   if (num !== null && num >= 0 && num <= 100) return num;
   return null;
@@ -307,9 +312,17 @@ export type StudentWithMarks = {
   fullName: string;
   batch?: { year: number };
   semesterRecord?: { semester: number };
-  internship?: { sourceRowRawJson: string | null } | null;
+  internship?: { sourceRowRawJson: string | null; grade?: string | null } | null;
   reviewMarks?: Array<{ reviewNumber: number; rowJson: string }>;
 };
+
+function applyGradeFallback(row: MarksRow, grade?: string | null): void {
+  if (extractFinalTotal(row) !== null) return;
+  const match = grade?.match(/total\s*:\s*([\d.]+)/i);
+  if (match?.[1]) {
+    row["evaluation.totalMarks"] = match[1];
+  }
+}
 
 export function buildStudentMarksRecord(student: StudentWithMarks): StudentMarksRecord {
   const reviews: Partial<Record<ReviewNumber, MarksRow>> = {};
@@ -324,7 +337,8 @@ export function buildStudentMarksRecord(student: StudentWithMarks): StudentMarks
   }
 
   const finalRow = extractFinalMarksRow(student.internship?.sourceRowRawJson);
-  const hasFinalData = rowHasValues(finalRow);
+  applyGradeFallback(finalRow, student.internship?.grade);
+  const hasFinalData = rowHasValues(finalRow) || extractFinalTotal(finalRow) !== null;
 
   return {
     usn: student.usn,

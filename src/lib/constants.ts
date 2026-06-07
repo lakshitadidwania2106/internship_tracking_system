@@ -1,12 +1,11 @@
 export const BATCH_SEMESTER_MAP: Record<number, number[]> = {
   2020: [8],
-<<<<<<< HEAD
   2021: [6, 8],
   2022: [8],
-=======
-  2021: [4, 6, 8],
->>>>>>> ff54da8 (fixed chatbot routing and imported student database)
 };
+
+/** Semester options shown in the dashboard filter (always both). */
+export const DASHBOARD_SEMESTER_OPTIONS = [6, 8] as const;
 
 export const COURSE_DETAILS: Record<string, { code: string; name: string; credits: number }> = {
   "2020-8": {
@@ -26,11 +25,7 @@ export const COURSE_DETAILS: Record<string, { code: string; name: string; credit
   },
   "2021-8": {
     code: "21INT82",
-<<<<<<< HEAD
     name: "Internship (Sem 8)",
-=======
-    name: "Internship",
->>>>>>> ff54da8 (fixed chatbot routing and imported student database)
     credits: 4,
   },
 };
@@ -38,7 +33,6 @@ export const COURSE_DETAILS: Record<string, { code: string; name: string; credit
 export const DASHBOARD_LINKS = [
   "Overview",
   "Students",
-  "Internships",
   "Status",
   "Data Management",
   "Settings",
@@ -53,6 +47,27 @@ export const MARK_UPLOAD_KINDS = [
 ] as const;
 
 export type MarkUploadKind = (typeof MARK_UPLOAD_KINDS)[number];
+
+/** Default sheet + header row when uploading marks (matches import scripts). */
+export const MARKS_IMPORT_PRESETS: Record<
+  string,
+  { sheetName?: string; headerRowIndex?: number; headerRowSpan?: number }
+> = {
+  "2020-8-final": { sheetName: "Marks Evaluation", headerRowIndex: 6, headerRowSpan: 2 },
+  "2020-8-internship_details": { sheetName: "sem 8  2020 batch", headerRowIndex: 0 },
+  "2021-6-final": { sheetName: "MarkSheet", headerRowIndex: 4 },
+  "2021-6-internship_details": { sheetName: "SEM 6", headerRowIndex: 4 },
+  "2021-8-final": { sheetName: "Sheet1", headerRowIndex: 0 },
+  "2021-8-internship_details": { sheetName: "DETAILS", headerRowIndex: 0 },
+};
+
+export function getMarksImportPreset(
+  batchYear: number,
+  semester: number,
+  markKind: MarkUploadKind,
+): { sheetName?: string; headerRowIndex?: number; headerRowSpan?: number } {
+  return MARKS_IMPORT_PRESETS[`${batchYear}-${semester}-${markKind}`] ?? {};
+}
 
 export const STORED_FILE_KIND = {
   REVIEW_1_XLSX: "review_1_xlsx",

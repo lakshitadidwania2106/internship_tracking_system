@@ -17,6 +17,8 @@ export type ImportExcelOptions = {
   semester: number;
   sheetName?: string;
   headerRowIndex?: number;
+  /** When the sheet uses two header rows (category + sub-column), set to 2. */
+  headerRowSpan?: number;
   usnColumnIndex?: number;
   nameColumnIndex?: number;
   mode?: ImportMode;
@@ -33,6 +35,7 @@ export type ImportSheetResult = {
   skippedNoUsn: number;
   sheetName: string;
   uniqueUsnsTouched: number;
+  fileName?: string;
 };
 
 export type BulkImportResult = {
@@ -43,7 +46,7 @@ export type BulkImportResult = {
   skippedNoUsn: number;
   uniqueUsnsTouched: number;
   totalStudentsInDb: number;
-  sheetResults: Array<ImportSheetResult & { fileName: string }>;
+  sheetResults: ImportSheetResult[];
 };
 
 function readCell(record: Record<string, unknown>, candidates: string[]): string | undefined {
@@ -54,6 +57,37 @@ function readCell(record: Record<string, unknown>, candidates: string[]): string
     }
   }
   return undefined;
+}
+
+function normalizeHeaderPart(value: unknown): string {
+  return `${value ?? ""}`.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildColumnHeaders(
+  rawRows: (string | number)[][],
+  headerRowIndex: number,
+  headerRowSpan = 1,
+): string[] {
+  const bottom = rawRows[headerRowIndex] ?? [];
+  if (headerRowSpan <= 1) {
+    return bottom.map((cell) => normalizeHeaderPart(cell));
+  }
+
+  const top = rawRows[headerRowIndex - 1] ?? [];
+  const maxLen = Math.max(bottom.length, top.length);
+  const headers: string[] = [];
+
+  for (let i = 0; i < maxLen; i += 1) {
+    const topCell = normalizeHeaderPart(top[i]);
+    const bottomCell = normalizeHeaderPart(bottom[i]);
+    if (topCell && bottomCell && topCell !== bottomCell) {
+      headers.push(`${topCell} ${bottomCell}`);
+    } else {
+      headers.push(bottomCell || topCell);
+    }
+  }
+
+  return headers;
 }
 
 function detectHeaderRow(rawRows: (string | number)[][]): number {
@@ -205,17 +239,19 @@ export async function runExcelImport(
     header: 1,
     defval: "",
   });
+  const headerRowSpan = options.headerRowSpan ?? 1;
   const headerRowIndex = options.headerRowIndex ?? detectHeaderRow(rawRows);
-  const header = rawRows[headerRowIndex] ?? [];
+  const header = buildColumnHeaders(rawRows, headerRowIndex, headerRowSpan);
   const usnColumnIndex =
     options.usnColumnIndex ?? findColumnIndex(header, ["USN"]);
   const nameColumnIndex =
     options.nameColumnIndex ?? findColumnIndex(header, ["NAME", "STUDENT NAME", "STUDENT"]);
 
-  const rowPairs = rawRows.slice(headerRowIndex + 1).map((raw) => {
+  const dataStartRow = headerRowIndex + headerRowSpan;
+  const rowPairs = rawRows.slice(dataStartRow).map((raw) => {
     const record: Record<string, unknown> = {};
     for (let i = 0; i < header.length; i += 1) {
-      const key = `${header[i] ?? ""}`.trim();
+      const key = header[i];
       if (key) {
         record[key] = raw[i];
       }
@@ -292,8 +328,40 @@ export async function runExcelImport(
     const internshipTitle = readCell(row, ["INTERNSHIP TITLE"]);
 
     const existingInternship = await prisma.internship.findUnique({ where: { studentId: student.id } });
-    const existingRowRaw =
-      existingInternship?.sourceRowRawJson ? JSON.parse(existingInternship.sourceRowRawJson) : {};
+    const existingRowRaw = existingInternship?.sourceRowRawJson
+      ? (JSON.parse(existingInternship.sourceRowRawJson) as Record<string, unknown>)
+      : {};
+
+    const prevEval =
+      existingRowRaw.evaluation && typeof existingRowRaw.evaluation === "object"
+        ? (existingRowRaw.evaluation as Record<string, unknown>)
+        : {};
+
+    const evaluation = {
+      ...prevEval,
+      ...(totalMarks ? { totalMarks } : {}),
+      ...(reportMarks ? { reportMarks } : {}),
+      ...(presentationMarks ? { presentationMarks } : {}),
+      ...(evaluatorName ? { evaluatorName } : {}),
+      ...(internshipTitle ? { internshipTitle } : {}),
+    };
+
+    const storedPayload: Record<string, unknown> = {
+      ...existingRowRaw,
+      ...row,
+      evaluation,
+    };
+
+    if (mode === "marks") {
+      storedPayload.finalMarksSheet = { ...row };
+    } else {
+      storedPayload.internshipSheet = { ...row };
+      const prevFinal =
+        existingRowRaw.finalMarksSheet && typeof existingRowRaw.finalMarksSheet === "object"
+          ? (existingRowRaw.finalMarksSheet as Record<string, unknown>)
+          : {};
+      storedPayload.finalMarksSheet = prevFinal;
+    }
 
     await prisma.internship.upsert({
       where: { studentId: student.id },
@@ -304,12 +372,11 @@ export async function runExcelImport(
         durationText: mode === "marks" ? existingInternship?.durationText ?? duration : duration,
         startDateRaw: mode === "marks" ? existingInternship?.startDateRaw ?? fromDate : fromDate,
         endDateRaw: mode === "marks" ? existingInternship?.endDateRaw ?? toDate : toDate,
-        grade: totalMarks ? `Total: ${totalMarks}` : existingInternship?.grade,
-        sourceRowRawJson: JSON.stringify({
-          ...existingRowRaw,
-          ...row,
-          evaluation: { totalMarks, reportMarks, presentationMarks, evaluatorName, internshipTitle },
-        }),
+        grade: totalMarks
+          ? `Total: ${totalMarks}`
+          : existingInternship?.grade ??
+            (prevEval.totalMarks ? `Total: ${prevEval.totalMarks}` : undefined),
+        sourceRowRawJson: JSON.stringify(storedPayload),
       },
       create: {
         studentId: student.id,
@@ -320,10 +387,7 @@ export async function runExcelImport(
         startDateRaw: fromDate,
         endDateRaw: toDate,
         grade: totalMarks ? `Total: ${totalMarks}` : null,
-        sourceRowRawJson: JSON.stringify({
-          ...row,
-          evaluation: { totalMarks, reportMarks, presentationMarks, evaluatorName, internshipTitle },
-        }),
+        sourceRowRawJson: JSON.stringify(storedPayload),
       },
     });
 

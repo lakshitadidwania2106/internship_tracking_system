@@ -75,7 +75,9 @@ export function DashboardFilters({
           disabled={isPending}
           onChange={(e) => {
             const batch = Number(e.target.value);
-            const sem = semesterOptions[semesterOptions.length - 1] ?? semester;
+            const sem = semesterOptions.includes(semester)
+              ? semester
+              : semesterOptions[0];
             navigate({ batch, semester: sem, usn: usnInput });
           }}
           className="rounded-lg border border-border bg-white px-3 py-2.5 text-sm outline-none ring-primary/20 focus:ring disabled:opacity-60"

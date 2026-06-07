@@ -1,3 +1,4 @@
+import { DASHBOARD_SEMESTER_OPTIONS } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 
 export async function getDashboardStats(batchYear?: number, semester?: number) {
@@ -115,13 +116,13 @@ export async function resolveDashboardFilters(input: {
     batchYear = def.batchYear;
     semester = def.semester;
   } else if (!semester) {
-    const sems = input.batchMap[batchYear] ?? [];
-    semester = sems.length > 0 ? sems[sems.length - 1] : 8;
+    semester = DASHBOARD_SEMESTER_OPTIONS[DASHBOARD_SEMESTER_OPTIONS.length - 1];
   }
 
-  const sems = input.batchMap[batchYear] ?? [];
-  if (!sems.includes(semester)) {
-    semester = sems.length > 0 ? sems[sems.length - 1] : semester;
+  if (!DASHBOARD_SEMESTER_OPTIONS.includes(semester as (typeof DASHBOARD_SEMESTER_OPTIONS)[number])) {
+    semester = DASHBOARD_SEMESTER_OPTIONS.includes(8)
+      ? 8
+      : DASHBOARD_SEMESTER_OPTIONS[0];
   }
 
   return {
