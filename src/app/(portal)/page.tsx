@@ -9,23 +9,20 @@ import {
 import {
   buildDashboardAnalytics,
   buildStudentProfileAnalytics,
+  type BatchCohortSummary,
 } from "@/lib/analytics";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ChatAssistant } from "@/components/chat-assistant";
 import { DataManagementPanel } from "@/components/data-management-panel";
-import { MarksDistributionPanel } from "@/components/marks-distribution-panel";
 import { AccountSettingsPanel } from "@/components/account-settings-panel";
 import { StatusPanel } from "@/components/status-panel";
 import { PortalUserMenu } from "@/components/portal-user-menu";
 import { StudentInternshipSummary } from "@/components/student-internship-summary";
 import { OverviewDashboard } from "@/components/analytics/overview-dashboard";
 import { StudentProfilePanel } from "@/components/analytics/student-profile-panel";
-import {
-  CompactStudentList,
-  StudentSearchHint,
-} from "@/components/analytics/compact-student-list";
+import { StudentSearchHint } from "@/components/analytics/compact-student-list";
 import { formatGradeDisplay } from "@/lib/format-grade";
-import { CalendarDays, Download, User } from "lucide-react";
+import { Download } from "lucide-react";
 import Image from "next/image";
 
 type PageProps = {
@@ -69,7 +66,35 @@ export default async function Home({ searchParams }: PageProps) {
     getDashboardStats(selectedBatch, selectedSemester),
   ]);
 
-  const analytics = buildDashboardAnalytics(allStudents, stats.internshipCount);
+  const analytics = buildDashboardAnalytics(allStudents, stats.internshipCount, selectedSemester);
+
+  const cohortSemesters = (batchYear: number) =>
+    batchYear === 2020 || batchYear === 2022 ? [8] : [...DASHBOARD_SEMESTER_OPTIONS];
+
+  const allBatchesSummary: BatchCohortSummary[] = await Promise.all(
+    batchOptions.flatMap((batchYear) =>
+      cohortSemesters(batchYear).map(async (semester) => {
+        const [cohortStudents, cohortStats] = await Promise.all([
+          getStudentsForBatchSemester(batchYear, semester),
+          getDashboardStats(batchYear, semester),
+        ]);
+        const cohortAnalytics = buildDashboardAnalytics(
+          cohortStudents,
+          cohortStats.internshipCount,
+          semester,
+        );
+        return {
+          batchYear,
+          semester,
+          totalStudents: cohortStats.totalStudents,
+          totalInternships: cohortStats.internshipCount,
+          averageMarks: cohortAnalytics.overview.averageMarks,
+          passPercentage: cohortAnalytics.overview.passPercentage,
+          completionPercent: cohortAnalytics.internship.completionPercent,
+        };
+      }),
+    ),
+  );
 
   const focusStudent =
     usnQuery.length > 0
@@ -81,13 +106,6 @@ export default async function Home({ searchParams }: PageProps) {
   const studentProfile = focusStudent
     ? buildStudentProfileAnalytics(focusStudent, selectedBatch, selectedSemester)
     : null;
-
-  const marksFocusStudent =
-    students.find((student) => student.usn.toUpperCase() === usnQuery.toUpperCase()) ??
-    students[0] ??
-    focusStudent;
-
-  const topCompanies = getTopCompanies(allStudents);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -220,120 +238,9 @@ export default async function Home({ searchParams }: PageProps) {
               analytics={analytics}
               batchYear={selectedBatch}
               semester={selectedSemester}
+              allBatchesSummary={allBatchesSummary}
             />
           </div>
-        ) : null}
-
-        {activeTab === "students" ? (
-          <section className="rounded-xl border border-border bg-white p-5 shadow-sm">
-            <h3 className="mb-1 text-lg font-semibold text-[var(--dsce-navy)]">
-              Student directory
-            </h3>
-            <p className="mb-4 text-sm text-muted">
-              {allStudents.length} students · click a row to open analytics profile
-            </p>
-            <CompactStudentList
-              students={allStudents}
-              focusUsn={usnQuery}
-              batchYear={selectedBatch}
-              semester={selectedSemester}
-            />
-            <div className="mt-6 overflow-x-auto">
-              <h4 className="mb-3 font-semibold">Detailed student table</h4>
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="px-3 py-2 text-left">USN</th>
-                    <th className="px-3 py-2 text-left">Name</th>
-                    <th className="px-3 py-2 text-left">Company</th>
-                    <th className="px-3 py-2 text-left">Role</th>
-                    <th className="px-3 py-2 text-left">Marks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allStudents.map((student) => {
-                    const evalRow = getEvaluationSnapshot(student.internship?.sourceRowRawJson);
-                    return (
-                      <tr key={student.id} className="border-b border-border">
-                        <td className="px-3 py-2">{student.usn}</td>
-                        <td className="px-3 py-2">{student.fullName}</td>
-                        <td className="px-3 py-2">{student.internship?.companyName ?? "-"}</td>
-                        <td className="px-3 py-2">{student.internship?.roleTitle ?? "-"}</td>
-                        <td className="px-3 py-2">{evalRow.totalMarks ?? "-"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        ) : null}
-
-        {activeTab === "marks distribution" ? (
-          <MarksDistributionPanel
-            students={allStudents}
-            batchYear={selectedBatch}
-            semester={selectedSemester}
-            focusUsn={usnQuery || undefined}
-            focusStudent={marksFocusStudent ?? null}
-            totalStudents={stats.totalStudents}
-            internshipCount={stats.internshipCount}
-          />
-        ) : null}
-
-        {activeTab === "internships" ? (
-          <section className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <MetricCard label="Total Students" value={String(stats.totalStudents)} />
-              <MetricCard label="Internships" value={String(stats.internshipCount)} />
-              <MetricCard label="Batch" value={String(selectedBatch)} />
-            </div>
-            <div className="rounded-xl border border-border bg-white p-4">
-              <h3 className="mb-3 text-lg font-semibold">Top Internship Companies</h3>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {topCompanies.map((item) => (
-                  <MetricCard key={item.name} label={item.name} value={`${item.count} students`} />
-                ))}
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-white p-4">
-              <h4 className="mb-3 font-semibold">Internship Records</h4>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-100">
-                    <tr>
-                      <th className="px-3 py-2 text-left">USN</th>
-                      <th className="px-3 py-2 text-left">Student</th>
-                      <th className="px-3 py-2 text-left">Company</th>
-                      <th className="px-3 py-2 text-left">Duration</th>
-                      <th className="px-3 py-2 text-left">Stipend</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allStudents.map((student) => (
-                      <tr key={student.id} className="border-b border-border">
-                        <td className="px-3 py-2">{student.usn}</td>
-                        <td className="px-3 py-2">{student.fullName}</td>
-                        <td className="px-3 py-2">{student.internship?.companyName ?? "-"}</td>
-                        <td className="px-3 py-2">
-                          {student.internship?.durationText ??
-                            `${student.internship?.startDateRaw ?? "-"} to ${student.internship?.endDateRaw ?? "-"}`}
-                        </td>
-                        <td className="px-3 py-2">{student.internship?.stipend ?? "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-white p-4 text-sm text-muted">
-              <p className="mb-1 inline-flex items-center gap-2 font-medium text-slate-700">
-                <CalendarDays className="h-4 w-4" />
-                Data Notes
-              </p>
-              <p>Excel import folders are ready at data/imports/excel and data/imports/reports.</p>
-            </div>
-          </section>
         ) : null}
 
         {activeTab === "status" ? (
@@ -359,68 +266,12 @@ export default async function Home({ searchParams }: PageProps) {
         ) : null}
 
         <ChatAssistant
-          selectedUsn={focusStudent?.usn ?? marksFocusStudent?.usn ?? students[0]?.usn}
-          selectedName={focusStudent?.fullName ?? marksFocusStudent?.fullName ?? students[0]?.fullName}
+          selectedUsn={focusStudent?.usn ?? students[0]?.usn ?? allStudents[0]?.usn}
+          selectedName={focusStudent?.fullName ?? students[0]?.fullName ?? allStudents[0]?.fullName}
         />
       </main>
     </div>
   );
-}
-
-function getEvaluationSnapshot(rawJson?: string | null) {
-  const fallback = {
-    totalMarks: undefined as string | undefined,
-    reportMarks: undefined as string | undefined,
-    presentationMarks: undefined as string | undefined,
-    evaluatorName: undefined as string | undefined,
-  };
-  if (!rawJson) {
-    return fallback;
-  }
-  try {
-    const parsed = JSON.parse(rawJson) as {
-      evaluation?: {
-        totalMarks?: string;
-        reportMarks?: string;
-        presentationMarks?: string;
-        evaluatorName?: string;
-      };
-      ["TOTAL\n(100)"]?: string;
-      ["Max-100"]?: string;
-    };
-    return {
-      totalMarks: parsed.evaluation?.totalMarks ?? parsed["TOTAL\n(100)"] ?? parsed["Max-100"],
-      reportMarks: parsed.evaluation?.reportMarks,
-      presentationMarks: parsed.evaluation?.presentationMarks,
-      evaluatorName: parsed.evaluation?.evaluatorName,
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-slate-50 p-3">
-      <p className="text-xs text-muted">{label}</p>
-      <p className="text-lg font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function getTopCompanies(
-  students: Array<{ internship: { companyName: string } | null }>,
-) {
-  const countMap = new Map<string, number>();
-  for (const student of students) {
-    const company = student.internship?.companyName?.trim();
-    if (!company) continue;
-    countMap.set(company, (countMap.get(company) ?? 0) + 1);
-  }
-  return Array.from(countMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([name, count]) => ({ name, count }));
 }
 
 function InfoItem({ label, value }: { label: string; value: string }) {

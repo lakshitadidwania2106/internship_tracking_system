@@ -207,8 +207,18 @@ function readMarkByPattern(row: MarksRow, matcher: (norm: string) => boolean): s
   return null;
 }
 
-export function extractFinalTotal(row: MarksRow): number | null {
+export function extractFinalTotal(row: MarksRow, semester?: number): number | null {
+  const sem6First =
+    semester === 6
+      ? readMarkByPattern(row, (n) => /marks\s*\(\s*100\s*\)/i.test(n)) ??
+        readMarkByPattern(
+          row,
+          (n) => n === "total" && !n.includes("reduced") && !n.includes("("),
+        )
+      : null;
+
   const totalStr =
+    sem6First ??
     readMarkByPattern(
       row,
       (n) =>
@@ -220,6 +230,7 @@ export function extractFinalTotal(row: MarksRow): number | null {
       row,
       (n) => (n === "total" || n.includes("grand total") || n === "max-100") && !n.includes("reduced"),
     ) ??
+    readMarkByPattern(row, (n) => /marks\s*\(\s*100\s*\)/i.test(n)) ??
     row["evaluation.totalMarks"];
   const num = parseNumeric(totalStr ?? undefined);
   if (num !== null && num >= 0 && num <= 100) return num;
@@ -316,15 +327,44 @@ export type StudentWithMarks = {
   reviewMarks?: Array<{ reviewNumber: number; rowJson: string }>;
 };
 
-function applyGradeFallback(row: MarksRow, grade?: string | null): void {
-  if (extractFinalTotal(row) !== null) return;
+function applyGradeFallback(row: MarksRow, grade?: string | null, semester?: number): void {
+  if (extractFinalTotal(row, semester) !== null) return;
   const match = grade?.match(/total\s*:\s*([\d.]+)/i);
   if (match?.[1]) {
     row["evaluation.totalMarks"] = match[1];
   }
 }
 
-export function buildStudentMarksRecord(student: StudentWithMarks): StudentMarksRecord {
+/** When final marks sheet is empty, merge the latest review row (e.g. batch 2020). */
+function applyReviewMarksFallback(
+  finalRow: MarksRow,
+  reviews: Partial<Record<ReviewNumber, MarksRow>>,
+  semester?: number,
+): void {
+  if (rowHasValues(finalRow) && extractFinalTotal(finalRow, semester) !== null) {
+    return;
+  }
+
+  for (const reviewNumber of [3, 2, 1] as ReviewNumber[]) {
+    const reviewRow = reviews[reviewNumber];
+    if (!reviewRow || !rowHasValues(reviewRow)) continue;
+
+    for (const [key, value] of Object.entries(reviewRow)) {
+      if (!finalRow[key]?.trim()) {
+        finalRow[key] = value;
+      }
+    }
+
+    if (extractFinalTotal(finalRow, semester) !== null) {
+      return;
+    }
+  }
+}
+
+export function buildStudentMarksRecord(
+  student: StudentWithMarks,
+  semester?: number,
+): StudentMarksRecord {
   const reviews: Partial<Record<ReviewNumber, MarksRow>> = {};
   const hasReviewData: Partial<Record<ReviewNumber, boolean>> = {};
 
@@ -336,9 +376,12 @@ export function buildStudentMarksRecord(student: StudentWithMarks): StudentMarks
     }
   }
 
+  const viewSemester = semester ?? student.semesterRecord?.semester;
   const finalRow = extractFinalMarksRow(student.internship?.sourceRowRawJson);
-  applyGradeFallback(finalRow, student.internship?.grade);
-  const hasFinalData = rowHasValues(finalRow) || extractFinalTotal(finalRow) !== null;
+  applyReviewMarksFallback(finalRow, reviews, viewSemester);
+  applyGradeFallback(finalRow, student.internship?.grade, viewSemester);
+  const hasFinalData =
+    rowHasValues(finalRow) || extractFinalTotal(finalRow, viewSemester) !== null;
 
   return {
     usn: student.usn,
@@ -350,8 +393,13 @@ export function buildStudentMarksRecord(student: StudentWithMarks): StudentMarks
   };
 }
 
-export function buildMarksDistributionData(students: StudentWithMarks[]): MarksDistributionData {
-  const studentRecords: StudentMarksRecord[] = students.map(buildStudentMarksRecord);
+export function buildMarksDistributionData(
+  students: StudentWithMarks[],
+  semester?: number,
+): MarksDistributionData {
+  const studentRecords: StudentMarksRecord[] = students.map((s) =>
+    buildStudentMarksRecord(s, semester),
+  );
 
   const finalColumns = collectColumnsFromRows(studentRecords.map((s) => s.finalRow));
   const reviewColumns: Record<ReviewNumber, string[]> = {
@@ -361,7 +409,7 @@ export function buildMarksDistributionData(students: StudentWithMarks[]): MarksD
   };
 
   const finalTotals = studentRecords
-    .map((s) => extractFinalTotal(s.finalRow))
+    .map((s) => extractFinalTotal(s.finalRow, semester))
     .filter((value): value is number => value !== null);
 
   const withReview = (reviewNumber: ReviewNumber) =>

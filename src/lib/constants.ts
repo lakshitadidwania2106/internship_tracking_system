@@ -35,9 +35,6 @@ export const COURSE_DETAILS: Record<
 
 export const DASHBOARD_LINKS = [
   "Overview",
-  "Students",
-  "Internships",
-  "Marks Distribution",
   "Status",
   "Data Management",
   "Settings",

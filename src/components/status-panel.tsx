@@ -2,7 +2,6 @@
 
 import {
   AlertTriangle,
-  Database,
   FileText,
   Loader2,
   RefreshCw,
@@ -10,7 +9,6 @@ import {
   Upload,
 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 type StoredFileRow = {
@@ -208,27 +206,6 @@ export function StatusPanel({
         </p>
       ) : data ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Students" value={String(data.batch._count.students)} icon={<Database className="h-4 w-4" />} />
-            <StatCard label="Stored uploads" value={String(data.storedFiles.length)} icon={<FileText className="h-4 w-4" />} />
-            <StatCard label="Report PDFs" value={String(data.studentDocuments.length)} icon={<FileText className="h-4 w-4" />} />
-            <StatCard label="Review mark rows" value={String(data.reviewMarkCount)} icon={<FileText className="h-4 w-4" />} />
-          </div>
-
-          <div className="rounded-xl border border-border bg-white p-4">
-            <h4 className="mb-3 font-semibold">Semesters configured</h4>
-            <ul className="flex flex-wrap gap-2 text-sm">
-              {data.batch.semesters.map((s) => (
-                <li key={s.semester} className="rounded-full bg-slate-100 px-3 py-1">
-                  Sem {s.semester}: {s.courseCode} — {s.courseName}
-                </li>
-              ))}
-              {data.batch.semesters.length === 0 ? (
-                <li className="text-muted">No semesters — add via Data Management.</li>
-              ) : null}
-            </ul>
-          </div>
-
           <div className="rounded-xl border border-border bg-white p-4">
             <h4 className="mb-3 font-semibold">Uploaded archives & spreadsheets</h4>
             {data.storedFiles.length === 0 ? (
@@ -344,18 +321,6 @@ export function StatusPanel({
       {message ? (
         <p className="rounded-lg border border-border bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</p>
       ) : null}
-    </div>
-  );
-}
-
-function StatCard({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-border bg-white p-4">
-      <p className="mb-1 inline-flex items-center gap-1 text-xs text-muted">
-        {icon}
-        {label}
-      </p>
-      <p className="text-xl font-semibold">{value}</p>
     </div>
   );
 }
