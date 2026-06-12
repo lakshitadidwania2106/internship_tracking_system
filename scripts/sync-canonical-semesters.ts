@@ -1,8 +1,5 @@
-import { PrismaClient } from "../src/generated/prisma/client";
 import { BATCH_SEMESTER_MAP } from "../src/lib/constants";
-import { createSqliteAdapter } from "../src/lib/prisma-adapter";
-
-const prisma = new PrismaClient({ adapter: createSqliteAdapter() });
+import { prisma } from "../src/lib/prisma";
 
 async function main() {
   for (const [yearText, semesters] of Object.entries(BATCH_SEMESTER_MAP)) {
