@@ -1,7 +1,9 @@
+import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { COURSE_DETAILS } from "../src/lib/constants";
 import { importExcelFile, type ImportMode } from "../src/lib/importer";
+import { prisma } from "../src/lib/prisma";
 
 type ImportConfig = {
   batchYear: number;
@@ -126,7 +128,10 @@ async function main() {
   console.log("Done.");
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then(() => prisma.$disconnect())
+  .catch(async (error) => {
+    console.error(error);
+    await prisma.$disconnect();
+    process.exit(1);
+  });

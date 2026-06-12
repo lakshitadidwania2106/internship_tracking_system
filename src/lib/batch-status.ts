@@ -1,3 +1,4 @@
+import { buildBatchSemesterWhere } from "@/lib/batch-semester";
 import { prisma } from "@/lib/prisma";
 import { deleteObjectBytes } from "@/lib/r2";
 
@@ -22,12 +23,13 @@ export async function getBatchFileStatus(batchYear: number, semester?: number) {
     orderBy: { createdAt: "desc" },
   });
 
+  const studentWhere = semester
+    ? await buildBatchSemesterWhere(batchYear, semester)
+    : { batch: { year: batchYear } };
+
   const studentDocs = await prisma.studentDocument.findMany({
     where: {
-      student: {
-        batch: { year: batchYear },
-        ...(semester ? { semesterRecord: { semester } } : {}),
-      },
+      student: studentWhere,
       storageKey: { not: null },
     },
     include: {
@@ -48,10 +50,7 @@ export async function getBatchFileStatus(batchYear: number, semester?: number) {
 
   const reviewMarkCount = await prisma.studentReviewMark.count({
     where: {
-      student: {
-        batch: { year: batchYear },
-        ...(semester ? { semesterRecord: { semester } } : {}),
-      },
+      student: studentWhere,
     },
   });
 

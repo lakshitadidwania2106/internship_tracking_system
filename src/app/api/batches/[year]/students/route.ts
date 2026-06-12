@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listStudentsForBatchYear } from "@/lib/data";
+import { getStudentsForBatchSemester, listStudentsForBatchYear } from "@/lib/data";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request, context: { params: Promise<{ year: string }> }) {
@@ -20,19 +20,7 @@ export async function GET(request: Request, context: { params: Promise<{ year: s
 
   const students =
     semester && Number.isFinite(semester)
-      ? await prisma.student.findMany({
-          where: {
-            batchId: batch.id,
-            semesterRecord: { semester },
-          },
-          include: {
-            internship: true,
-            semesterRecord: true,
-            batch: true,
-            reviewMarks: { orderBy: { reviewNumber: "asc" } },
-          },
-          orderBy: { usn: "asc" },
-        })
+      ? await getStudentsForBatchSemester(batchYear, semester)
       : await listStudentsForBatchYear(batchYear);
 
   return NextResponse.json({ batchYear, semester: semester ?? null, students });

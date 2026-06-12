@@ -1,52 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { doc, getDoc } from "firebase/firestore";
 import { Loader2, Shield, UserCircle } from "lucide-react";
+import { AllowedEmailsPanel } from "@/components/allowed-emails-panel";
 import { useAuth } from "@/components/auth-provider";
-import { getFirebaseDb } from "@/lib/firebase-client";
-import { roleLabel, type PortalRole } from "@/lib/auth-roles";
-
-type ProfileRecord = {
-  email?: string;
-  phone?: string;
-  role?: PortalRole;
-  createdAt?: string;
-  updatedAt?: string;
-};
+import { roleLabel } from "@/lib/auth-roles";
 
 export function AccountSettingsPanel() {
   const { user, role, roleDisplay, loading: authLoading } = useAuth();
-  const [profile, setProfile] = useState<ProfileRecord | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
-
-  useEffect(() => {
-    if (!user) {
-      setProfile(null);
-      setProfileLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setProfileLoading(true);
-
-    void (async () => {
-      try {
-        const snap = await getDoc(doc(getFirebaseDb(), "users", user.uid));
-        if (!cancelled) {
-          setProfile(snap.exists() ? (snap.data() as ProfileRecord) : null);
-        }
-      } catch {
-        if (!cancelled) setProfile(null);
-      } finally {
-        if (!cancelled) setProfileLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
 
   if (authLoading) {
     return (
@@ -61,9 +21,8 @@ export function AccountSettingsPanel() {
     return <p className="text-sm text-muted">Sign in to view your account details.</p>;
   }
 
-  const effectiveRole = profile?.role ?? role ?? "coordinator";
-  const email = user.email ?? profile?.email ?? "—";
-  const phone = user.phoneNumber ?? profile?.phone ?? "—";
+  const effectiveRole = role ?? "coordinator";
+  const email = user.email ?? "—";
   const provider = user.providerData[0]?.providerId ?? "firebase";
 
   return (
@@ -82,19 +41,9 @@ export function AccountSettingsPanel() {
         <dl className="grid gap-4 sm:grid-cols-2">
           <Detail label="Role" value={roleDisplay || roleLabel(effectiveRole)} highlight />
           <Detail label="Email" value={email} />
-          <Detail label="Phone" value={phone} />
           <Detail label="Sign-in provider" value={provider} />
           <Detail label="User ID" value={user.uid} mono />
-          {profile?.createdAt ? <Detail label="Account created" value={formatWhen(profile.createdAt)} /> : null}
-          {profile?.updatedAt ? <Detail label="Profile updated" value={formatWhen(profile.updatedAt)} /> : null}
         </dl>
-
-        {profileLoading ? (
-          <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Syncing Firestore profile…
-          </p>
-        ) : null}
       </div>
 
       <div className="rounded-xl border border-border bg-white p-5">
@@ -105,7 +54,7 @@ export function AccountSettingsPanel() {
         {effectiveRole === "admin" ? (
           <p className="text-sm text-slate-700">
             You have <strong>administrator</strong> access: full portal tabs including Data Management,
-            batch uploads, and status controls.
+            batch uploads, and coordinator email management.
           </p>
         ) : (
           <p className="text-sm text-slate-700">
@@ -113,12 +62,9 @@ export function AccountSettingsPanel() {
             InternBot. Data Management requires an administrator account.
           </p>
         )}
-        <p className="mt-2 text-xs text-muted">
-          Admin emails are configured via{" "}
-          <code className="rounded bg-slate-100 px-1">NEXT_PUBLIC_AUTH_ADMIN_EMAILS</code> in the
-          environment.
-        </p>
       </div>
+
+      <AllowedEmailsPanel />
     </section>
   );
 }
@@ -144,12 +90,4 @@ function Detail({
       </dd>
     </div>
   );
-}
-
-function formatWhen(iso: string) {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
 }

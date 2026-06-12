@@ -167,7 +167,7 @@ export function buildDashboardAnalytics(
   const records = distribution.students;
 
   const finalTotals = records
-    .map((r) => extractFinalTotal(r.finalRow))
+    .map((r) => extractFinalTotal(r.finalRow, semester))
     .filter((v): v is number => v !== null);
 
   const passCount = finalTotals.filter((v) => v >= 40).length;

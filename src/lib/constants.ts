@@ -31,6 +31,11 @@ export const COURSE_DETAILS: Record<
     name: "Internship (Sem 8)",
     credits: 4,
   },
+  "2022-8": {
+    code: "22AIL84",
+    name: "Student Internship",
+    credits: 3,
+  },
 };
 
 export const DASHBOARD_LINKS = [
