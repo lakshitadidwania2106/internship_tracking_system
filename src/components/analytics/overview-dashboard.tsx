@@ -17,7 +17,6 @@ type OverviewDashboardProps = {
   batchYear: number;
   semester: number;
   allBatchesSummary: BatchCohortSummary[];
-  batchNote?: string | null;
 };
 
 export function OverviewDashboard({
@@ -25,7 +24,6 @@ export function OverviewDashboard({
   batchYear,
   semester,
   allBatchesSummary,
-  batchNote,
 }: OverviewDashboardProps) {
   const { overview: o } = analytics;
   const fmt = (n: number | null, suffix = "") =>
@@ -89,8 +87,8 @@ export function OverviewDashboard({
             </table>
           </div>
           <p className="mt-2 text-xs text-muted">
-            Highlights the cohort you are viewing.
-            {batchNote ? ` ${batchNote}` : ""}
+            Highlights the cohort you are viewing. Batch 2021 semester 6 uses merged marks stored on
+            semester 8 records when a separate sem 6 import has not run.
           </p>
         </section>
       ) : null}

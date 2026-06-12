@@ -1,13 +1,21 @@
-import { buildBatchSemesterWhere, getVisibleSemestersForBatch } from "@/lib/batch-2021";
+import { DASHBOARD_SEMESTER_OPTIONS } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 
 export async function getDashboardStats(batchYear?: number, semester?: number) {
   if (batchYear && semester) {
-    const where = await buildBatchSemesterWhere(batchYear, semester);
-    const [totalStudents, internshipCount] = await Promise.all([
+    const where = { batch: { year: batchYear }, semesterRecord: { semester } };
+    let [totalStudents, internshipCount] = await Promise.all([
       prisma.student.count({ where }),
       prisma.internship.count({ where: { student: where } }),
     ]);
+
+    if (batchYear === 2021 && semester === 6 && totalStudents === 0) {
+      const batchWhere = { batch: { year: batchYear } };
+      [totalStudents, internshipCount] = await Promise.all([
+        prisma.student.count({ where: batchWhere }),
+        prisma.internship.count({ where: { student: batchWhere } }),
+      ]);
+    }
 
     return {
       totalStudents,
@@ -41,6 +49,7 @@ const studentInclude = {
 export async function getDefaultBatchSemester(fallbackMap?: Record<number, number[]>) {
   const batches = await prisma.batch.findMany({
     include: {
+      semesters: { orderBy: { semester: "desc" } },
       _count: { select: { students: true } },
     },
     orderBy: { year: "desc" },
@@ -48,21 +57,15 @@ export async function getDefaultBatchSemester(fallbackMap?: Record<number, numbe
 
   for (const batch of batches) {
     if (batch._count.students === 0) continue;
-
-    const semesterOptions = await getVisibleSemestersForBatch(batch.year);
-    const options =
-      semesterOptions.length > 0 ? semesterOptions : (fallbackMap?.[batch.year] ?? [8]);
-
-    for (const semester of [...options].sort((a, b) => b - a)) {
+    for (const sem of batch.semesters) {
       const count = await prisma.student.count({
-        where: await buildBatchSemesterWhere(batch.year, semester),
+        where: { batchId: batch.id, semesterRecord: { semester: sem.semester } },
       });
       if (count > 0) {
-        return { batchYear: batch.year, semester };
+        return { batchYear: batch.year, semester: sem.semester };
       }
     }
-
-    return { batchYear: batch.year, semester: options[options.length - 1] ?? 8 };
+    return { batchYear: batch.year, semester: batch.semesters[0]?.semester ?? 8 };
   }
 
   const years = fallbackMap ? Object.keys(fallbackMap).map(Number).sort((a, b) => b - a) : [];
@@ -105,18 +108,13 @@ export async function resolveDashboardFilters(input: {
     if (match) {
       const requestedBatch = Number(input.batch);
       const requestedSem = Number(input.semester);
-      const visibleSemesters = await getVisibleSemestersForBatch(match.batch.year);
-      const displaySemester = visibleSemesters.includes(match.semesterRecord.semester)
-        ? match.semesterRecord.semester
-        : (visibleSemesters[0] ?? match.semesterRecord.semester);
-
       return {
         batchYear: match.batch.year,
-        semester: displaySemester,
+        semester: match.semesterRecord.semester,
         usnQuery: match.usn,
         contextAdjusted:
           (Number.isFinite(requestedBatch) && requestedBatch !== match.batch.year) ||
-          (Number.isFinite(requestedSem) && requestedSem !== displaySemester),
+          (Number.isFinite(requestedSem) && requestedSem !== match.semesterRecord.semester),
       };
     }
   }
@@ -129,13 +127,13 @@ export async function resolveDashboardFilters(input: {
     batchYear = def.batchYear;
     semester = def.semester;
   } else if (!semester) {
-    const options = input.batchMap[batchYear] ?? (await getVisibleSemestersForBatch(batchYear));
-    semester = options[options.length - 1] ?? 8;
+    semester = DASHBOARD_SEMESTER_OPTIONS[DASHBOARD_SEMESTER_OPTIONS.length - 1];
   }
 
-  const validSemesters = input.batchMap[batchYear] ?? (await getVisibleSemestersForBatch(batchYear));
-  if (!validSemesters.includes(semester)) {
-    semester = validSemesters[validSemesters.length - 1] ?? validSemesters[0] ?? 8;
+  if (!DASHBOARD_SEMESTER_OPTIONS.includes(semester as (typeof DASHBOARD_SEMESTER_OPTIONS)[number])) {
+    semester = DASHBOARD_SEMESTER_OPTIONS.includes(8)
+      ? 8
+      : DASHBOARD_SEMESTER_OPTIONS[0];
   }
 
   return {
@@ -155,6 +153,7 @@ export async function searchStudents({
   batchYear?: number;
   semester?: number;
   usn?: string;
+  /** USN or partial name */
   query?: string;
 }) {
   const q = (query ?? usn)?.trim();
@@ -164,12 +163,10 @@ export async function searchStudents({
       }
     : {};
 
-  const batchSemesterWhere =
-    batchYear && semester ? await buildBatchSemesterWhere(batchYear, semester) : {};
-
   return prisma.student.findMany({
     where: {
-      ...batchSemesterWhere,
+      ...(batchYear ? { batch: { year: batchYear } } : {}),
+      ...(semester ? { semesterRecord: { semester } } : {}),
       ...whereQuery,
     },
     include: studentInclude,
@@ -180,13 +177,31 @@ export async function searchStudents({
 }
 
 export async function getStudentsForBatchSemester(batchYear: number, semester: number) {
-  return prisma.student.findMany({
-    where: await buildBatchSemesterWhere(batchYear, semester),
+  const direct = await prisma.student.findMany({
+    where: {
+      batch: { year: batchYear },
+      semesterRecord: { semester },
+    },
     include: studentInclude,
     orderBy: {
       usn: "asc",
     },
   });
+
+  if (direct.length > 0) {
+    return direct;
+  }
+
+  // Batch 2021 sem 6 marks often live on sem 8 student rows when only sem 8 import ran.
+  if (batchYear === 2021 && semester === 6) {
+    return prisma.student.findMany({
+      where: { batch: { year: batchYear } },
+      include: studentInclude,
+      orderBy: { usn: "asc" },
+    });
+  }
+
+  return direct;
 }
 
 export async function getRecentImportJobs() {
@@ -199,6 +214,10 @@ export async function getRecentImportJobs() {
 export async function getBatchSemesterMapFromDb() {
   const batches = await prisma.batch.findMany({
     include: {
+      semesters: {
+        select: { id: true, semester: true },
+        orderBy: { semester: "asc" },
+      },
       _count: { select: { students: true } },
     },
     orderBy: { year: "asc" },
@@ -207,9 +226,19 @@ export async function getBatchSemesterMapFromDb() {
   const map: Record<number, number[]> = {};
   for (const batch of batches) {
     if (batch._count.students === 0) continue;
-    const semesters = await getVisibleSemestersForBatch(batch.year);
-    if (semesters.length > 0) {
-      map[batch.year] = semesters;
+
+    const semestersWithStudents: number[] = [];
+    for (const sem of batch.semesters) {
+      const count = await prisma.student.count({
+        where: { batchId: batch.id, semesterRecordId: sem.id },
+      });
+      if (count > 0) {
+        semestersWithStudents.push(sem.semester);
+      }
+    }
+
+    if (semestersWithStudents.length > 0) {
+      map[batch.year] = semestersWithStudents;
     }
   }
   return map;

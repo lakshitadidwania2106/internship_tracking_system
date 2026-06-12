@@ -1,23 +1,8 @@
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { getDatabaseFilePath } from "@/lib/database-path";
 
-const globalForPg = globalThis as unknown as {
-  pgPool?: Pool;
-};
-
-function getPgPool() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is not set.");
-  }
-
-  if (!globalForPg.pgPool) {
-    globalForPg.pgPool = new Pool({ connectionString });
-  }
-
-  return globalForPg.pgPool;
-}
-
-export function createPgAdapter() {
-  return new PrismaPg(getPgPool());
+export function createSqliteAdapter() {
+  const dbPath = getDatabaseFilePath();
+  // Adapter strips the "file:" prefix and opens that path with better-sqlite3.
+  return new PrismaBetterSqlite3({ url: `file:${dbPath}` });
 }

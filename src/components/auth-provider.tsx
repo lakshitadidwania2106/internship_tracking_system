@@ -14,9 +14,9 @@ import {
   signOut as firebaseSignOut,
   type User,
 } from "firebase/auth";
-import { getIdToken } from "firebase/auth";
-import { getFirebaseAuth } from "@/lib/firebase-client";
-import { roleLabel, type PortalRole } from "@/lib/auth-roles";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase-client";
+import { resolveRoleFromEmail, roleLabel, type PortalRole } from "@/lib/auth-roles";
 
 type AuthContextValue = {
   user: User | null;
@@ -29,27 +29,35 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-async function verifyPortalAccess(user: User): Promise<PortalRole | null> {
-  const token = await getIdToken(user);
-  const res = await fetch("/api/auth/verify", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as { authorized?: boolean; role?: PortalRole };
-  return data.authorized && data.role ? data.role : null;
+async function loadOrCreateProfile(user: User): Promise<PortalRole> {
+  const db = getFirebaseDb();
+  const ref = doc(db, "users", user.uid);
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    const data = snap.data() as { role?: PortalRole };
+    if (data.role === "admin" || data.role === "coordinator") {
+      return data.role;
+    }
+  }
+  const role = resolveRoleFromEmail(user.email);
+  await setDoc(
+    ref,
+    {
+      email: user.email ?? "",
+      phone: user.phoneNumber ?? "",
+      role,
+      updatedAt: new Date().toISOString(),
+      ...(snap.exists() ? {} : { createdAt: new Date().toISOString() }),
+    },
+    { merge: true },
+  );
+  return role;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<PortalRole | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const signOut = useCallback(async () => {
-    await firebaseSignOut(getFirebaseAuth());
-    setUser(null);
-    setRole(null);
-  }, []);
 
   const refreshProfile = useCallback(async () => {
     const auth = getFirebaseAuth();
@@ -58,14 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRole(null);
       return;
     }
-    const nextRole = await verifyPortalAccess(current);
-    if (!nextRole) {
-      await signOut();
-      setRole(null);
-      return;
-    }
+    const nextRole = await loadOrCreateProfile(current);
     setRole(nextRole);
-  }, [signOut]);
+  }, []);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -77,24 +80,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       setLoading(true);
-      void verifyPortalAccess(nextUser)
-        .then(async (nextRole) => {
-          if (!nextRole) {
-            await firebaseSignOut(auth);
-            setUser(null);
-            setRole(null);
-            return;
-          }
-          setRole(nextRole);
-        })
-        .catch(async () => {
-          await firebaseSignOut(auth);
-          setUser(null);
-          setRole(null);
-        })
+      void loadOrCreateProfile(nextUser)
+        .then(setRole)
+        .catch(() => setRole(resolveRoleFromEmail(nextUser.email)))
         .finally(() => setLoading(false));
     });
     return unsub;
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await firebaseSignOut(getFirebaseAuth());
+    setUser(null);
+    setRole(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(

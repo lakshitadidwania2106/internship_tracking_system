@@ -1,5 +1,4 @@
-import { getBatch2021Mode, getVisibleSemestersForBatch, semesterViewNote } from "@/lib/batch-2021";
-import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS } from "@/lib/constants";
+import { BATCH_SEMESTER_MAP, DASHBOARD_LINKS, DASHBOARD_SEMESTER_OPTIONS } from "@/lib/constants";
 import {
   getBatchSemesterMapFromDb,
   getDashboardStats,
@@ -55,8 +54,7 @@ export default async function Home({ searchParams }: PageProps) {
   const batchOptions = Object.keys(effectiveBatchMap)
     .map(Number)
     .sort((a, b) => a - b);
-  const semesterOptions =
-    effectiveBatchMap[selectedBatch] ?? (await getVisibleSemestersForBatch(selectedBatch));
+  const semesterOptions = [...DASHBOARD_SEMESTER_OPTIONS];
 
   const [students, allStudents, stats] = await Promise.all([
     searchStudents({
@@ -70,36 +68,33 @@ export default async function Home({ searchParams }: PageProps) {
 
   const analytics = buildDashboardAnalytics(allStudents, stats.internshipCount, selectedSemester);
 
-  const batch2021Mode = await getBatch2021Mode(selectedBatch);
-  const batch2021Note = semesterViewNote(selectedBatch, batch2021Mode);
+  const cohortSemesters = (batchYear: number) =>
+    batchYear === 2020 || batchYear === 2022 ? [8] : [...DASHBOARD_SEMESTER_OPTIONS];
 
-  const allBatchesSummary: BatchCohortSummary[] = (
-    await Promise.all(
-      batchOptions.flatMap((batchYear) =>
-        (effectiveBatchMap[batchYear] ?? []).map(async (semester) => {
-          const [cohortStudents, cohortStats] = await Promise.all([
-            getStudentsForBatchSemester(batchYear, semester),
-            getDashboardStats(batchYear, semester),
-          ]);
-          if (cohortStats.totalStudents === 0) return null;
-          const cohortAnalytics = buildDashboardAnalytics(
-            cohortStudents,
-            cohortStats.internshipCount,
-            semester,
-          );
-          return {
-            batchYear,
-            semester,
-            totalStudents: cohortStats.totalStudents,
-            totalInternships: cohortStats.internshipCount,
-            averageMarks: cohortAnalytics.overview.averageMarks,
-            passPercentage: cohortAnalytics.overview.passPercentage,
-            completionPercent: cohortAnalytics.internship.completionPercent,
-          };
-        }),
-      ),
-    )
-  ).filter((row): row is BatchCohortSummary => row !== null);
+  const allBatchesSummary: BatchCohortSummary[] = await Promise.all(
+    batchOptions.flatMap((batchYear) =>
+      cohortSemesters(batchYear).map(async (semester) => {
+        const [cohortStudents, cohortStats] = await Promise.all([
+          getStudentsForBatchSemester(batchYear, semester),
+          getDashboardStats(batchYear, semester),
+        ]);
+        const cohortAnalytics = buildDashboardAnalytics(
+          cohortStudents,
+          cohortStats.internshipCount,
+          semester,
+        );
+        return {
+          batchYear,
+          semester,
+          totalStudents: cohortStats.totalStudents,
+          totalInternships: cohortStats.internshipCount,
+          averageMarks: cohortAnalytics.overview.averageMarks,
+          passPercentage: cohortAnalytics.overview.passPercentage,
+          completionPercent: cohortAnalytics.internship.completionPercent,
+        };
+      }),
+    ),
+  );
 
   const focusStudent =
     usnQuery.length > 0
@@ -244,7 +239,6 @@ export default async function Home({ searchParams }: PageProps) {
               batchYear={selectedBatch}
               semester={selectedSemester}
               allBatchesSummary={allBatchesSummary}
-              batchNote={batch2021Note}
             />
           </div>
         ) : null}

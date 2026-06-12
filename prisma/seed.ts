@@ -1,14 +1,26 @@
-import { ensureAdminEmailSeeded } from "../src/lib/auth-server";
+import { PrismaClient } from "../src/generated/prisma/client";
 import { COURSE_DETAILS } from "../src/lib/constants";
-import { prisma } from "../src/lib/prisma";
+import { createSqliteAdapter } from "../src/lib/prisma-adapter";
 import { sampleRecords } from "../src/lib/sample-data";
 
-async function ensureBatchesAndSemesters() {
-  for (const year of [2020, 2021, 2022]) {
-    await prisma.batch.upsert({
-      where: { year },
-      update: {},
-      create: { year },
+const prisma = new PrismaClient({
+  adapter: createSqliteAdapter(),
+});
+
+async function seed() {
+  await prisma.studentDocument.deleteMany();
+  await prisma.storedFile.deleteMany();
+  await prisma.importJob.deleteMany();
+  await prisma.studentReviewMark.deleteMany();
+  await prisma.outcomeMapping.deleteMany();
+  await prisma.internship.deleteMany();
+  await prisma.student.deleteMany();
+  await prisma.semesterRecord.deleteMany();
+  await prisma.batch.deleteMany();
+
+  for (const year of [2020, 2021]) {
+    await prisma.batch.create({
+      data: { year },
     });
   }
 
@@ -18,19 +30,8 @@ async function ensureBatchesAndSemesters() {
     const semester = Number(semesterText);
     const batch = await prisma.batch.findUniqueOrThrow({ where: { year } });
 
-    await prisma.semesterRecord.upsert({
-      where: {
-        batchId_semester: {
-          batchId: batch.id,
-          semester,
-        },
-      },
-      update: {
-        courseCode: course.code,
-        courseName: course.name,
-        credits: course.credits,
-      },
-      create: {
+    await prisma.semesterRecord.create({
+      data: {
         batchId: batch.id,
         semester,
         courseCode: course.code,
@@ -38,14 +39,6 @@ async function ensureBatchesAndSemesters() {
         credits: course.credits,
       },
     });
-  }
-}
-
-async function seedDemoStudents() {
-  const existing = await prisma.student.count();
-  if (existing > 0) {
-    console.log(`Skipping demo students — ${existing} records already present.`);
-    return;
   }
 
   for (const row of sampleRecords) {
@@ -101,14 +94,6 @@ async function seedDemoStudents() {
       },
     });
   }
-
-  console.log(`Seeded ${sampleRecords.length} demo students.`);
-}
-
-async function seed() {
-  await ensureAdminEmailSeeded();
-  await ensureBatchesAndSemesters();
-  await seedDemoStudents();
 }
 
 seed()
